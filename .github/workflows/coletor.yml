@@ -5,6 +5,7 @@ name: Coletor
 on:
   schedule:
     - cron: "23 * * * *"
+    - cron: "40 14 2 11 *"  # teste único: 02/nov 11:40 de Brasília
   workflow_dispatch:
 
 permissions:
