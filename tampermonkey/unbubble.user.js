@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.2.0
-// @description  Home anti-bolha do YouTube: fileira "Dos seus canais" e captura do seu histórico para o curador.
+// @version      0.3.0
+// @description  Home anti-bolha do YouTube: fileira "Dos seus canais", teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
 // @run-at       document-idle
@@ -322,6 +322,101 @@
     location.reload();
   }
 
+  // ---------- Teto por tema nos recomendados do YouTube ----------
+  // Em qualquer janela de 10 recomendados seguidos, no máximo N do mesmo tema (e 2 do mesmo canal).
+  // O tema vem do Haiku (saida/temas.json): primeiro o do vídeo; se ainda não tiver, o do canal.
+  const TETOS = { jogos: 4, politica: 2, ia_tecnologia: 2, lixo_algoritmo: 0 };
+  const JANELA = 10;
+  const POR_CANAL_JANELA = 2;
+  const ENVIO_FILA_MIN = 10;   // manda os recomendados sem tema ao GitHub no máximo a cada 10 min
+
+  let temasMapa = null;
+  const decisao = new Map();      // id -> { mostrar, tema, canal }  (decidido uma vez por página)
+  const semTema = new Map();      // id -> { id, titulo, canal } para mandar classificar
+
+  async function lerTemas() {
+    const cache = GM_getValue('temas_cache', null);
+    if (cache && agora() - cache.lido_em < 10 * 60e3) return cache.temas;
+    try {
+      const temas = JSON.parse(await github('GET', 'contents/saida/temas.json'));
+      GM_setValue('temas_cache', { lido_em: agora(), temas });
+      return temas;
+    } catch (e) {
+      log('não consegui ler os temas:', e.message);
+      return cache ? cache.temas : null;
+    }
+  }
+
+  function dadosDoItem(it) {
+    const a = it.querySelector('a[href^="/watch?v="]');
+    if (!a) return null;  // anúncio ou outro formato: não mexe
+    const id = new URL(a.href, location.origin).searchParams.get('v');
+    const titulo = it.querySelector('h3[title]')?.getAttribute('title') || '';
+    const linha = it.querySelector('.ytContentMetadataViewModelMetadataRow');  // 1ª linha = canal(is)
+    const canal = (linha?.querySelector('a[href^="/@"], a[href^="/channel/"]') || linha?.querySelector('span[role="text"]'))
+      ?.textContent?.trim() || '';
+    return id ? { id, titulo, canal } : null;
+  }
+
+  function aplicarTetos(contents) {
+    if (!temasMapa) return;
+    const mantidos = [];  // { tema, canal } dos últimos mostrados, em ordem
+    let escondidos = 0;
+    for (const it of contents.querySelectorAll(':scope > ytd-rich-item-renderer')) {
+      const d = dadosDoItem(it);
+      if (!d) continue;
+      let dec = decisao.get(d.id);
+      if (!dec) {
+        const tv = temasMapa.videos?.[d.id];
+        const tema = tv ? tv[0] : temasMapa.canais?.[d.canal] || null;
+        if (!tv) semTema.set(d.id, d);
+        const janela = mantidos.slice(-(JANELA - 1));
+        const doTema = tema ? janela.filter(m => m.tema === tema).length : 0;
+        const doCanal = d.canal ? janela.filter(m => m.canal === d.canal).length : 0;
+        const teto = tema in TETOS ? TETOS[tema] : Infinity;
+        dec = { mostrar: doTema < teto && doCanal < POR_CANAL_JANELA, tema, canal: d.canal };
+        decisao.set(d.id, dec);
+      }
+      it.style.display = dec.mostrar ? '' : 'none';
+      if (dec.mostrar) mantidos.push(dec); else escondidos++;
+    }
+    const nota = document.getElementById('ub-teto');
+    if (nota) nota.textContent = escondidos ? `${escondidos} recomendados escondidos pelo teto de temas` : '';
+    enviarSemTemaSeHora();
+  }
+
+  function enviarSemTemaSeHora() {
+    if (!semTema.size || agora() - GM_getValue('ultimo_envio_fila', 0) < ENVIO_FILA_MIN * 60e3) return;
+    GM_setValue('ultimo_envio_fila', agora());
+    const itens = [...semTema.values()].slice(0, 500);
+    semTema.clear();
+    const caminho = 'contents/dados/fila/pendentes.json';
+    (async () => {
+      let sha;
+      try { sha = JSON.parse(await github('GET', caminho, null, { json: true })).sha; } catch (e) { /* ainda não existe */ }
+      await github('PUT', caminho, {
+        message: `Recomendados para classificar (${itens.length})`,
+        content: base64(JSON.stringify({ enviado_em: new Date().toISOString(), itens })), ...(sha ? { sha } : {}),
+      }, { json: true, tempo: 30000 });
+      log(`mandei ${itens.length} recomendados para classificar`);
+    })().catch(e => log('não consegui mandar a fila:', e.message));
+  }
+
+  let observador = null;
+  async function iniciarTeto(contents) {
+    temasMapa = await lerTemas();
+    if (!temasMapa) return;  // sem temas: home do YouTube fica como está
+    decisao.clear();
+    aplicarTetos(contents);
+    observador?.disconnect();
+    let espera = null;
+    observador = new MutationObserver(() => {
+      clearTimeout(espera);
+      espera = setTimeout(() => { try { aplicarTetos(contents); } catch (e) { log('erro no teto:', e); } }, 300);
+    });
+    observador.observe(contents, { childList: true });
+  }
+
   // ---------- Encaixe na home do YouTube ----------
   function alvo() {
     return document.querySelector('ytd-browse[page-subtype="home"] ytd-rich-grid-renderer #contents');
@@ -349,8 +444,8 @@
         desenharConvite(caixa);
       } else {
         const home = await lerHome();
-        if (!home) return;  // falhou e sem cache: deixa a home original
-        desenharFileiras(caixa, home);
+        if (home) desenharFileiras(caixa, home);  // falhou e sem cache: sem fileiras, mas o teto ainda vale
+        caixa.append(el('div', { class: 'ub-aviso', id: 'ub-teto' }));
       }
       if (document.getElementById('unbubble')) return;
       // mesma largura e recuo da grade de vídeos do YouTube
@@ -358,6 +453,7 @@
       caixa.style.marginLeft = `${Math.max(g.left - pai.left, 0)}px`;
       caixa.style.marginRight = `${Math.max(pai.right - g.right, 0)}px`;
       contents.before(caixa);
+      if (GM_getValue('token', '')) iniciarTeto(contents).catch(e => log('erro no teto:', e));
     } catch (e) {
       log('erro, home original mantida:', e);
     } finally {
