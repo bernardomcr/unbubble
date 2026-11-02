@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.4.0
+// @version      0.4.1
 // @description  Home anti-bolha do YouTube: fileiras Dos seus canais, Em Alta e Mais vistos, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -25,7 +25,7 @@
   'use strict';
 
   const REPO = 'bernardomcr/unbubble-pessoal';
-  const CACHE_MIN = 30;            // relê o home.json do GitHub no máximo a cada 30 min
+  const CACHE_MIN = 10;            // relê o home.json do GitHub no máximo a cada 10 min
   const VELHO_H = 1;               // home.json mais velho que isso => pede ao GitHub para refazer (o Em Alta muda de hora em hora)
   const INTERVALO_DISPARO_H = 1;   // no máximo um pedido de refazer por hora
   const COR = '#4FADEA';
@@ -462,6 +462,14 @@
     } finally {
       rodando = false;
     }
+  }
+
+  // Versão nova do script: descarta o que estava guardado (pode ter sido lido antes das fileiras novas existirem)
+  const versao = GM_info?.script?.version;
+  if (versao && GM_getValue('versao', '') !== versao) {
+    GM_setValue('versao', versao);
+    GM_setValue('home_cache', null);
+    GM_setValue('temas_cache', null);
   }
 
   GM_registerMenuCommand('Conectar / trocar token', configurarToken);
