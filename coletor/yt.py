@@ -51,17 +51,46 @@ def api(metodo, **params):
             motivo = json.loads(corpo)["error"]["errors"][0]["reason"]
         except (ValueError, KeyError, IndexError):
             motivo = corpo[:200]
-        raise RuntimeError(f"API {metodo} falhou: HTTP {e.code} ({motivo})") from None
+        raise ErroAPI(metodo, e.code, motivo) from None
 
 
-def videos(ids):
-    """Estatísticas, duração e idioma de vários vídeos (1 unidade por lote de 50)."""
+class ErroAPI(RuntimeError):
+    def __init__(self, metodo, codigo, motivo):
+        super().__init__(f"API {metodo} falhou: HTTP {codigo} ({motivo})")
+        self.codigo = codigo
+        self.motivo = motivo
+
+
+def videos(ids, part="snippet,contentDetails,statistics"):
+    """Dados de vários vídeos (1 unidade por lote de 50)."""
     saida = []
     for i in range(0, len(ids), 50):
-        r = api("videos", part="snippet,contentDetails,statistics",
-                id=",".join(ids[i:i + 50]), maxResults=50)
+        r = api("videos", part=part, id=",".join(ids[i:i + 50]), maxResults=50)
         saida.extend(r.get("items", []))
     return saida
+
+
+def paises_dos_canais(ids):
+    """País declarado de cada canal ({id: "BR" | None}); 1 unidade por lote de 50."""
+    saida = {}
+    for i in range(0, len(ids), 50):
+        r = api("channels", part="snippet", id=",".join(ids[i:i + 50]), maxResults=50)
+        for c in r.get("items", []):
+            saida[c["id"]] = c["snippet"].get("country")
+    return saida
+
+
+def comentarios(video_id, quantos=100):
+    """Textos dos comentários mais relevantes (1 unidade). None se desativados/indisponíveis."""
+    try:
+        r = api("commentThreads", part="snippet", videoId=video_id, maxResults=quantos,
+                order="relevance", textFormat="plainText")
+    except ErroAPI as e:
+        if e.codigo == 404 or e.motivo in ("commentsDisabled", "forbidden"):
+            return None
+        raise
+    return [t["snippet"]["topLevelComment"]["snippet"].get("textDisplay", "")
+            for t in r.get("items", [])]
 
 
 def segundos(iso):

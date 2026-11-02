@@ -1,0 +1,51 @@
+name: Coletor
+
+# De hora em hora (minuto 7, para fugir do pico do GitHub no minuto 0).
+# Os dados ficam na branch "dados", sobrescrita a cada execução (sem histórico acumulado).
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: coletor
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Testes do filtro Brasil
+        run: python -m unittest discover testes
+      - name: Baixar dados da execução anterior
+        run: |
+          if git ls-remote --exit-code --heads origin dados > /dev/null; then
+            git clone --quiet --depth 1 --branch dados "https://github.com/${{ github.repository }}" dados
+          else
+            mkdir dados
+          fi
+      - name: Coletar
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+          DADOS_DIR: dados
+        run: python coletor/coletor.py
+      - name: Publicar dados
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd dados
+          rm -rf .git
+          git init --quiet -b dados
+          git config user.name "unbubble-coletor"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add estado.json ranking.json
+          git commit --quiet -m "Dados de $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push --quiet --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}" dados
