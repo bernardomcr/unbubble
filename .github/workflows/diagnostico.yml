@@ -3,6 +3,12 @@ name: Diagnóstico do coletor
 # Roda só quando alguém aperta "Run workflow" (não gasta cota sozinho).
 on:
   workflow_dispatch:
+    inputs:
+      teste:
+        description: "Qual teste rodar"
+        type: choice
+        options: [diagnostico, teste_duracao]
+        default: diagnostico
 
 permissions:
   contents: read
@@ -19,12 +25,12 @@ jobs:
       - name: Rodar diagnóstico
         env:
           YT_API_KEY: ${{ secrets.YT_API_KEY }}
-        run: python coletor/diagnostico.py
+        run: python coletor/${{ inputs.teste }}.py
       - name: Guardar relatório (some em 7 dias)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostico
-          path: relatorios/diagnostico.json
+          name: ${{ inputs.teste }}
+          path: relatorios/${{ inputs.teste }}.json
           retention-days: 7
           if-no-files-found: ignore
