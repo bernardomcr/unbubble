@@ -4,20 +4,58 @@ Contexto para o Claude Code. Dono do projeto: Bernardo (não é programador; exp
 
 ## Objetivo
 
-Substituir a home do YouTube por uma home própria que fure a bolha do algoritmo, combinando três pilares:
+Substituir a home do YouTube por uma home própria que fure a bolha do algoritmo.
 
-1. **Em Alta reconstruído** (o YouTube removeu a página Em Alta em julho de 2025).
-2. **Recomendações dos amigos** (o que o algoritmo do YouTube recomenda para cada amigo).
-3. **Garimpo** (canais médios em ascensão + vídeos de poucas views, inclusive estrangeiros e antigos).
+**Direção principal (decidida em 02/nov/2026): curador pessoal com IA.** Entender o histórico do Bernardo (o que viu, até onde viu, o que clicou), recuperar interesses que o algoritmo do YouTube deixou sumir (ex.: desenho), e sugerir coisas novas que conversam com os gostos dele, sem a fórmula de "vídeos extremamente parecidos". O objetivo é diferente do YouTube: otimizar variedade, redescoberta e o que ele quer, não tempo de tela. Detalhes na seção "Curador pessoal com IA".
+
+Fontes adicionais, como fileiras da home:
+1. **Em Alta reconstruído** (o YouTube removeu a página Em Alta em julho de 2025). Já rodando; mantido.
+2. **Recomendações dos amigos** (o que o algoritmo do YouTube recomenda para cada amigo). Futuro.
+3. **Garimpo** (canais médios em ascensão + vídeos de poucas views, inclusive estrangeiros e antigos). Futuro.
 
 Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Virar extensão oficial só depois que tudo funcionar.
 
 ## Arquitetura
 
-- **Coletor (servidor):** GitHub Actions rodando de hora em hora. Faz as buscas, mede views, lê comentários, calcula scores e publica o ranking. Migrar para VPS só se necessário.
-- **Banco dos amigos (pilar 2):** Google Apps Script + planilha, protegido por senha do grupo.
-- **Script no navegador:** lê o ranking pronto e desenha a home. Também captura a home de cada amigo (pilar 2).
-- **Regra de segurança:** se qualquer parte falhar, a home original do YouTube aparece normalmente. Nunca página em branco.
+- **Nada pessoal preso a um PC.** Bernardo usa dois PCs e pode formatar: o PC é só uma "janela"; formatou, instala Tampermonkey + script e cola um token, o resto volta sozinho.
+- **Repo público `bernardomcr/unbubble`:** código do script (atualização automática via `@updateURL`), coletor do Em Alta, ranking público (só IDs e números, branch `dados`) e página de avaliação (GitHub Pages, `docs/`).
+- **Repo privado `bernardomcr/unbubble-pessoal` (a criar):** dados pessoais (histórico resumido, mapa de interesses, cliques/tempo assistido, tema de cada canal, notas de afinidade, gasto da IA) e a **chave da API de IA como segredo**. A IA roda em GitHub Actions desse repo; nenhum PC guarda a chave. Histórico **nunca** vai para o repo público.
+- **Script no navegador:** lê o que só existe logado (histórico com barra de progresso, inscritos, curtidas, buscas, chips da home, recomendados), registra cliques e tempo assistido, envia ao repo privado com um token de acesso restrito a ele, e desenha a home a partir do resultado. Cópia local só como cache.
+- **Coletor do Em Alta (servidor):** GitHub Actions de hora em hora no repo público. Migrar para VPS só se necessário.
+- **Banco dos amigos (pilar 2, futuro):** Google Apps Script + planilha, protegido por senha do grupo.
+- **Regra de segurança:** se qualquer parte falhar (inclusive crédito de IA acabado), a home cai para o modo sem IA ou para a home original do YouTube. Nunca página em branco.
+
+## Curador pessoal com IA (decidido em 02/nov/2026)
+
+**Dados (lidos no navegador, sem cota):** histórico do YouTube (com quanto de cada vídeo foi visto), Google Takeout 1x (histórico completo de anos), inscritos, curtidas, playlists, histórico de buscas, chips da home (os temas do Bernardo na visão do YouTube) e, daqui para frente, o registro do próprio script (cliques, tempo assistido, o que foi mostrado e ignorado).
+
+**Modelos e ritmo:**
+| Quando | Modelo | Papel |
+|---|---|---|
+| 1x/dia, madrugada | Claude Sonnet 5.5 (`claude-sonnet-5-5`) | "Editor do dia": lê mapa + o que foi visto ontem + candidatos pré-filtrados; escolhe os destaques (20–30) com o porquê; propõe 3–5 rumos novos de exploração para o garimpo do dia seguinte |
+| 1x/semana | Sonnet 5.5 | "Análise profunda": refaz o mapa de interesses (ativos, adormecidos, vizinhos) e a análise dos inscritos |
+| Quando o interesse muda de repente (~5 vídeos seguidos de algo fora do mapa) | Sonnet 5.5 | Atualização extra do mapa |
+| Várias vezes/dia | Claude Haiku 5.5 (`claude-haiku-5-5`) | Classifica vídeos e canais novos (tema), dá nota de afinidade, ordena o feed. Cada vídeo/canal é avaliado uma vez e a nota fica guardada |
+- Reagir devagar é proposital: o perfil consolida por semana para um dia de maratona não sequestrar a home (é assim que a bolha do YouTube nasce).
+- Código preparado para trocar de fornecedor de IA por configuração.
+
+**Orçamento:** até **R$ 25/mês**. Estimativa ~US$ 4/mês (editor diário ~2,5; semanal ~1,3; Haiku ~0,5; inscritos <1). Travas: crédito pré-pago na Anthropic **sem recarga automática** (~US$ 5) + limite de gasto no painel + contador de custo no código (perto do limite, só Haiku; sem crédito, modo sem IA). Usar cache de prompt para a parte repetida (mapa). Medir o custo real na 1ª semana e mostrar ao Bernardo.
+
+**Inscritos, em gavetas** (contagem sem IA: vídeos vistos por canal, última vez, % visto, se o canal ainda posta via RSS):
+1. Favoritos ativos. 2. **Esquecidos que valem resgate** (via muito e até o fim, parou, canal segue postando). 3. Canais que pararam ou mudaram. 4. Inscrição por impulso.
+A IA entende por que parou, escolhe os vídeos recentes certos e acha canais parecidos.
+
+**Feed em camadas (nunca acaba):**
+1. Destaques do dia (Sonnet, 20–30, com explicação).
+2. Feed principal: centenas de candidatos do garimpo (interesses adormecidos, apostas novas, canais esquecidos) ordenados pelo Haiku.
+3. Fileiras por tema, estilo Netflix ("Desenho", "Ciência", "Jogos — só os melhores").
+4. Recomendados do próprio YouTube, com teto por tema (ex.: jogo no máx. 4–5 por bloco), quando o estoque acabar.
+5. Em Alta, Mais vistos, Dos seus canais, e no futuro amigos e garimpo.
+- Pular também ensina: mostrado ~3x sem clique, recua; clicou e viu até o fim, reforça. Sempre reservar vagas para novidade de verdade.
+
+**Em Alta personalizado (sem virar bolha):** os 5–10 primeiros do Em Alta ficam fixos (o que o Brasil está vendo); do resto, o Haiku dá nota de afinidade com o mapa e os de afinidade alta sobem; os de afinidade baixa descem, não somem. Mesma lógica nos Mais vistos 24 h. Roda no repo privado lendo o ranking público. O editor diário pode puxar 2–3 do Em Alta para os destaques.
+
+**Limites assumidos:** não prevemos o próximo clique melhor que o YouTube; ganhamos no objetivo (variedade/redescoberta) e na explicação. A IA julga por título, descrição, canal e comportamento (legendas só em casos pontuais). O YouTube muda a página às vezes: o script precisa de manutenção. Dados vão para a API da Anthropic (que, pela política dela, não usa dados da API para treino por padrão).
 
 ## API do YouTube (fatos verificados em nov/2026)
 
@@ -109,8 +147,9 @@ Buscas usam filtro de duração (`videoDuration`) para não gastar resultados co
 
 ## Ordem de execução
 
-1. **Fase 1 (agora):** coletor do pilar 1 no GitHub Actions. Primeiro dia: medir quantos resultados cada busca devolve, testar RSS, testar detecção de Shorts. Definir onde o ranking fica publicado (repo privado, ou repo público publicando só IDs + scores).
-2. Rodar 1–2 semanas; Bernardo avalia se o ranking "parece Brasil"; calibrar com o dataset e ajustar pesos.
-3. Script de Tampermonkey: nova home com fileiras do pilar 1.
-4. Pilar 2 (captura + Apps Script + fileira dos amigos).
-5. Pilar 3.
+1. ~~Fase 1: coletor do Em Alta no GitHub Actions~~ (feito em 02/nov/2026: ranking público, página https://bernardomcr.github.io/unbubble/, curadoria de variedade). Segue rodando sozinho; calibração com o dataset fica para depois.
+2. **Agora:** criar o repo privado `unbubble-pessoal`; Bernardo cria a conta da API da Anthropic (crédito ~US$ 5, sem recarga automática) e guarda a chave como segredo do repo privado.
+3. **Raio-x da conta:** script de Tampermonkey que lê histórico (com % visto), inscritos e curtidas e envia ao repo privado; Sonnet gera um relatório (interesses ativos, adormecidos com exemplos, gavetas dos inscritos, 5–10 apostas novas com o porquê). Bernardo avalia se "é isso mesmo" antes de seguir. Opcional: comparar Haiku × Sonnet nos dados reais.
+4. Primeira fileira na home: **Dos seus canais** (favoritos + esquecidos voltando).
+5. Editor diário + feed em camadas + teto por tema nos recomendados do YouTube + Em Alta personalizado.
+6. Pilar 2 (amigos) e pilar 3 (garimpo).
