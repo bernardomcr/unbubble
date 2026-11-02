@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.1.0
-// @description  Home anti-bolha do YouTube: fileira "Dos seus canais" (favoritos + esquecidos que valem resgate).
+// @version      0.2.0
+// @description  Home anti-bolha do YouTube: fileira "Dos seus canais" e captura do seu histórico para o curador.
 // @match        https://www.youtube.com/*
 // @noframes
 // @run-at       document-idle
@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        unsafeWindow
 // @connect      api.github.com
 // @updateURL    https://raw.githubusercontent.com/bernardomcr/unbubble/main/tampermonkey/unbubble.user.js
 // @downloadURL  https://raw.githubusercontent.com/bernardomcr/unbubble/main/tampermonkey/unbubble.user.js
@@ -28,12 +29,14 @@
   const VELHO_H = 3;               // home.json mais velho que isso => pede ao GitHub para refazer
   const INTERVALO_DISPARO_H = 1;   // no máximo um pedido de refazer por hora
   const COR = '#4FADEA';
+  const CAPTURA_H = 20;            // captura histórico/inscritos/curtidas no máximo a cada 20 h
+  const PAGINAS_HISTORICO = 30;    // ~1 mês de histórico por captura (o resto já está no repo)
 
   const agora = () => Date.now();
   const log = (...a) => console.log('[unbubble]', ...a);
 
   // ---------- GitHub ----------
-  function github(metodo, caminho, corpo) {
+  function github(metodo, caminho, corpo, { json = false, tempo = 15000 } = {}) {
     const token = GM_getValue('token', '');
     return new Promise((ok, falha) => {
       if (!token) return falha(new Error('sem token'));
@@ -42,12 +45,12 @@
         url: `https://api.github.com/repos/${REPO}/${caminho}`,
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github.raw+json',
+          Accept: json ? 'application/vnd.github+json' : 'application/vnd.github.raw+json',
           'X-GitHub-Api-Version': '2022-11-28',
           ...(corpo ? { 'Content-Type': 'application/json' } : {}),
         },
         data: corpo ? JSON.stringify(corpo) : undefined,
-        timeout: 15000,
+        timeout: tempo,
         onload: r => (r.status >= 200 && r.status < 300 ? ok(r.responseText) : falha(new Error(`GitHub ${r.status}`))),
         onerror: () => falha(new Error('rede')),
         ontimeout: () => falha(new Error('tempo esgotado')),
@@ -77,6 +80,145 @@
     github('POST', 'actions/workflows/home.yml/dispatches', { ref: 'main' })
       .then(() => log('pedi ao GitHub para atualizar a home'))
       .catch(e => log('não consegui pedir atualização:', e.message));
+  }
+
+  // ---------- Captura (histórico com % assistido, inscritos, curtidas) ----------
+  // Usa a mesma API interna que a página do YouTube usa, com o login do próprio navegador. Sem cota.
+  const achar = (o, k, out = []) => {
+    if (o && typeof o === 'object') for (const [kk, v] of Object.entries(o)) { if (kk === k) out.push(v); achar(v, k, out); }
+    return out;
+  };
+
+  async function sha1(s) {
+    const b = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function browse(corpo) {
+    const ytcfg = unsafeWindow.ytcfg;
+    const sapisid = (document.cookie.match(/(?:^|; )(?:SAPISID|__Secure-3PAPISID)=([^;]+)/) || [])[1];
+    if (!ytcfg || !sapisid) throw new Error('YouTube sem login ou sem configuração');
+    const ts = Math.floor(agora() / 1000);
+    const r = await fetch('/youtubei/v1/browse?prettyPrint=false', {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `SAPISIDHASH ${ts}_${await sha1(`${ts} ${sapisid} ${location.origin}`)}`,
+        'X-Origin': location.origin,
+        'X-Goog-AuthUser': String(ytcfg.get('SESSION_INDEX') ?? 0),
+        'X-Youtube-Client-Name': '1',
+        'X-Youtube-Client-Version': ytcfg.get('INNERTUBE_CLIENT_VERSION'),
+      },
+      body: JSON.stringify({ context: ytcfg.get('INNERTUBE_CONTEXT'), ...corpo }),
+    });
+    if (!r.ok) throw new Error(`YouTube ${r.status}`);
+    return r.json();
+  }
+
+  function itemLockup(l) {
+    const md = l.metadata?.lockupMetadataViewModel;
+    if (!md) return null;
+    const partes = achar(md.metadata, 'metadataParts').flat();
+    const be = achar(md.image, 'browseEndpoint')[0] || achar(md, 'browseEndpoint')[0] || {};
+    const prog = achar(l.contentImage, 'thumbnailOverlayProgressBarViewModel')[0];
+    const selo = achar(l.contentImage, 'thumbnailBadgeViewModel').map(b => b.text).filter(Boolean)[0];
+    return { id: l.contentId, tipo: l.contentType, titulo: md.title?.content, canal: partes[0]?.text?.content,
+             canal_id: be.browseId, duracao: selo, visto_pct: prog ? prog.startPercent : null };
+  }
+
+  const proximo = j => achar(j, 'continuationItemRenderer')
+    .map(c => achar(c, 'continuationCommand')[0]?.token).filter(Boolean).pop();
+  const pausa = () => new Promise(r => setTimeout(r, 400));
+
+  async function lista(browseId, extrair, max) {
+    const itens = [];
+    let j = await browse({ browseId });
+    for (let i = 0; i < max; i++) {
+      itens.push(...extrair(j));
+      const tok = proximo(j);
+      if (!tok) break;
+      await pausa();
+      j = await browse({ continuation: tok });
+    }
+    return itens;
+  }
+
+  async function historico() {
+    const itens = [];
+    let secao = null, j = await browse({ browseId: 'FEhistory' });
+    for (let i = 0; i < PAGINAS_HISTORICO; i++) {
+      for (const s of achar(j, 'itemSectionRenderer')) {
+        const h = s.header?.itemSectionHeaderRenderer?.title;
+        if (h) secao = h.simpleText ?? h.runs?.map(r => r.text).join('');
+        for (const l of achar(s, 'lockupViewModel')) { const it = itemLockup(l); if (it) itens.push({ ...it, dia: secao }); }
+        for (const sh of achar(s, 'shortsLockupViewModel')) {
+          itens.push({ id: achar(sh, 'videoId')[0], tipo: 'SHORT', titulo: sh.overlayMetadata?.primaryText?.content, dia: secao });
+        }
+      }
+      const tok = achar(j, 'continuationCommand')[0]?.token;
+      if (!tok) break;
+      await pausa();
+      j = await browse({ continuation: tok });
+    }
+    return itens;
+  }
+
+  async function capturar() {
+    const vistos = new Set();
+    const inscritos = await lista('FEchannels', j => achar(j, 'channelRenderer')
+      .filter(c => !vistos.has(c.channelId) && vistos.add(c.channelId))
+      .map(c => ({ canal_id: c.channelId, nome: c.title?.simpleText, handle: c.subscriberCountText?.simpleText,
+                   inscritos: c.videoCountText?.simpleText,
+                   descricao: (c.descriptionSnippet?.runs || []).map(r => r.text).join('').slice(0, 300) })), 50);
+    const curtidas = await lista('VLLL', j => achar(j, 'lockupViewModel').map(itemLockup).filter(Boolean), 100);
+    const hist = await historico();
+    return { capturado_em: new Date().toISOString(), versao: GM_info?.script?.version, historico: hist, inscritos, curtidas };
+  }
+
+  function capturaEstranha(c) {
+    const valido = id => /^[\w-]{11}$/.test(id || '');
+    if (c.historico.length < 20) return `histórico com só ${c.historico.length} itens`;
+    if (c.historico.filter(i => !valido(i.id)).length > c.historico.length * 0.05) return 'muitos IDs inválidos';
+    if (!c.historico.some(i => i.dia)) return 'histórico sem datas';
+    return null;
+  }
+
+  function base64(texto) {
+    const bytes = new TextEncoder().encode(texto);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
+  async function enviarCaptura(c) {
+    const caminho = 'contents/dados/captura/ultima.json';
+    let sha;
+    try { sha = JSON.parse(await github('GET', caminho, null, { json: true })).sha; } catch (e) { /* ainda não existe */ }
+    await github('PUT', caminho, {
+      message: `Captura do navegador (${c.historico.length} itens do histórico)`,
+      content: base64(JSON.stringify(c)), ...(sha ? { sha } : {}),
+    }, { json: true, tempo: 120000 });
+  }
+
+  let capturando = false;
+  async function capturarSeHora(forcar = false) {
+    if (capturando || !GM_getValue('token', '')) return;
+    if (!forcar && agora() - GM_getValue('ultima_captura', 0) < CAPTURA_H * 36e5) return;
+    capturando = true;
+    GM_setValue('ultima_captura', agora());  // marca antes: se falhar, tenta de novo só na próxima janela
+    try {
+      const c = await capturar();
+      const problema = capturaEstranha(c);
+      if (problema) throw new Error(`captura estranha, não enviada: ${problema}`);
+      await enviarCaptura(c);
+      GM_setValue('captura_status', { em: agora(), ok: true, itens: c.historico.length });
+      log(`captura enviada: ${c.historico.length} itens do histórico, ${c.inscritos.length} inscritos, ${c.curtidas.length} curtidas`);
+    } catch (e) {
+      GM_setValue('captura_status', { em: agora(), ok: false, erro: String(e.message || e) });
+      log('captura falhou:', e);
+    } finally {
+      capturando = false;
+    }
   }
 
   // ---------- Registro local de cliques (para o aprendizado depois) ----------
@@ -224,7 +366,9 @@
   }
 
   GM_registerMenuCommand('Conectar / trocar token', configurarToken);
+  GM_registerMenuCommand('Capturar meu histórico agora', () => capturarSeHora(true));
   GM_registerMenuCommand('Atualizar fileiras agora', () => { GM_setValue('home_cache', null); GM_setValue('ultimo_disparo', 0); location.reload(); });
   window.addEventListener('yt-navigate-finish', montar);
   montar();
+  setTimeout(() => capturarSeHora(), 8000);  // depois da página carregar, sem atrapalhar
 })();
