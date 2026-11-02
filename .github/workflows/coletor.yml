@@ -1,15 +1,20 @@
 name: Coletor
 
-# De hora em hora (minuto 23, longe do pico do GitHub perto da hora cheia).
+# De hora em hora, em corrente: cada execução espera até o próximo minuto 23 e dispara a seguinte.
+# (O agendamento "schedule" do GitHub nunca disparou neste repo; ver CLAUDE.md.)
+# Para parar a corrente: cancelar a execução que estiver esperando no job "proxima".
 # Os dados ficam na branch "dados", sobrescrita a cada execução (sem histórico acumulado).
 on:
-  schedule:
-    - cron: "23 * * * *"
-    - cron: "40 14 2 11 *"  # teste único: 02/nov 11:40 de Brasília
   workflow_dispatch:
+    inputs:
+      espera_min:
+        description: "Minutos até disparar a próxima (vazio = próximo minuto 23)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: coletor
@@ -50,3 +55,36 @@ jobs:
           git add estado.json ranking.json
           git commit --quiet -m "Dados de $(date -u +%Y-%m-%dT%H:%MZ)"
           git push --quiet --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}" dados
+
+  proxima:
+    needs: coletar
+    if: ${{ !cancelled() }}  # mesmo se a coleta falhar, a corrente continua
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - name: Esperar até a próxima rodada
+        env:
+          ESPERA_MIN: ${{ inputs.espera_min }}
+        run: |
+          agora=$(date -u +%s)
+          if [ -n "$ESPERA_MIN" ]; then
+            alvo=$((agora + ESPERA_MIN * 60))
+          else
+            alvo=$(( agora / 3600 * 3600 + 23 * 60 ))
+            while [ "$alvo" -le $((agora + 600)) ]; do alvo=$((alvo + 3600)); done
+          fi
+          echo "Próxima rodada: $(date -u -d @$alvo +%H:%MZ)"
+          sleep $((alvo - agora))
+      - name: Disparar a próxima (se já não houver outra na fila)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          outras=$(gh run list -R "$GITHUB_REPOSITORY" --workflow coletor.yml --limit 20 \
+            --json databaseId,status \
+            -q "[.[] | select(.status != \"completed\" and .databaseId != $GITHUB_RUN_ID)] | length")
+          if [ "$outras" -gt 0 ]; then
+            echo "Já existe outra execução na fila; não disparo para não duplicar."
+          else
+            gh workflow run coletor.yml -R "$GITHUB_REPOSITORY" --ref main
+            echo "Próxima execução disparada."
+          fi
