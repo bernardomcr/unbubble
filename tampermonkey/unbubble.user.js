@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.3.0
-// @description  Home anti-bolha do YouTube: fileira "Dos seus canais", teto por tema nos recomendados e captura do histórico.
+// @version      0.4.0
+// @description  Home anti-bolha do YouTube: fileiras Dos seus canais, Em Alta e Mais vistos, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
 // @run-at       document-idle
@@ -26,7 +26,7 @@
 
   const REPO = 'bernardomcr/unbubble-pessoal';
   const CACHE_MIN = 30;            // relê o home.json do GitHub no máximo a cada 30 min
-  const VELHO_H = 3;               // home.json mais velho que isso => pede ao GitHub para refazer
+  const VELHO_H = 1;               // home.json mais velho que isso => pede ao GitHub para refazer (o Em Alta muda de hora em hora)
   const INTERVALO_DISPARO_H = 1;   // no máximo um pedido de refazer por hora
   const COR = '#4FADEA';
   const CAPTURA_H = 20;            // captura histórico/inscritos/curtidas no máximo a cada 20 h
@@ -281,11 +281,12 @@
     const capa = el('div', { class: 'ub-capa' },
       el('img', { src: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, alt: '', loading: 'lazy' }));
     if (item.motivo === 'esquecido') capa.append(el('span', { class: 'ub-selo', title: 'Canal que você via e parou' }, 'resgate'));
+    else if (item.selo) capa.append(el('span', { class: 'ub-selo', title: 'Combina com os seus interesses' }, item.selo));
     return el('a', { class: 'ub-card', href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
       capa,
       el('div', { class: 'ub-nome', title: item.titulo }, item.titulo),
       el('div', { class: 'ub-meta' }, item.canal),
-      el('div', { class: 'ub-meta' }, `${views(item.views)} · ${quando(item.publicado)}`));
+      el('div', { class: 'ub-meta' }, item.meta || `${views(item.views)} · ${quando(item.publicado)}`));
   }
 
   function bloco() {
@@ -298,11 +299,13 @@
     for (const f of home.fileiras) {
       if (!f.itens || !f.itens.length) continue;
       const esq = f.itens.filter(i => i.motivo === 'esquecido').length;
+      const sub = f.id === 'seus_canais' ? (esq ? `${esq} de canais que você deixou de ver` : '')
+        : 'os primeiros como estão; o resto na ordem do que combina com você';
       caixa.append(
         el('div', { class: 'ub-cab' },
           el('h2', { class: 'ub-titulo' }, f.titulo),
           el('span', { class: 'ub-marca' }, 'unbubble'),
-          el('span', { class: 'ub-sub' }, esq ? `${esq} de canais que você deixou de ver` : '')),
+          el('span', { class: 'ub-sub' }, sub)),
         el('div', { class: 'ub-trilho' }, ...f.itens.map(i => card(i, f.id))));
     }
   }
