@@ -33,12 +33,23 @@ Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Vi
 
 ## Pilar 1: Em Alta (plano fechado)
 
-**Descoberta (~84 de 100 buscas/dia):**
-1. 3 rodadas/dia (manhã, tarde, noite; sem madrugada): geral com e sem filtro de português (2) + as **15 categorias nativas** do YouTube (15). Janela de 6 h; na rodada da manhã, janela de 12 h + página 2 do geral. Total: 53.
-2. ~20 tópicos (`topicId`) mais relevantes no Brasil, 1x/dia, janela de 72 h: 20.
-3. Lives (`eventType=live`, ordenadas por espectadores): 1 por rodada = 3.
-4. Termos do momento (autocompletar do YouTube, Google Trends, X), sem filtro de data, para pegar vídeos antigos que voltaram: 8.
-5. Reserva: 16 (para o pilar 3).
+**Descoberta (71 de 100 buscas/dia; revisado em 02/nov/2026 após diagnóstico):**
+Buscas usam filtro de duração (`videoDuration`) para não gastar resultados com Shorts: `medium` = 4–20 min, `long` = > 20 min.
+1. Geral com e sem filtro de português, cada um em médio e longo, 3 rodadas/dia (manhã, tarde, noite; sem madrugada): 12.
+2. As **14 categorias nativas** do YouTube, só médio, 2 rodadas/dia (manhã com janela de 12 h; noite com janela de 12 h): 28. Longo por categoria fica de fora (a geral de longos já pega os maiores).
+3. ~20 tópicos (`topicId`) mais relevantes no Brasil, 1x/dia, janela de 72 h: 20.
+4. Lives (`eventType=live`, ordenadas por espectadores, sem filtro de duração): 1 por rodada = 3.
+5. Termos do momento (autocompletar do YouTube, Google Trends, X), sem filtro de data, para pegar vídeos antigos que voltaram: 8.
+6. Reserva: 29 (pilar 3 e imprevistos).
+- Vídeos normais com menos de 4 min ficam de fora das buscas com filtro (3–5 por busca no teste); eles chegam pelo RSS dos canais do cache.
+
+**Diagnóstico do primeiro dia (02/nov/2026, janela de 24 h, Brasil):**
+- Todas as buscas com `order=viewCount` + filtro de data vieram cheias (50 resultados, com página 2). Nenhum resultado fora da janela.
+- São **14** categorias atribuíveis no Brasil (1, 2, 10, 15, 17, 19, 20, 22, 23, 24, 25, 26, 27, 28), não 15.
+- Sem filtro de duração, a maioria dos resultados tem até 3 min (geral: 42/50), e ~85% desses são Shorts (68/80 testados): sobram só 10–37 vídeos normais por busca. Com filtro, 50 de 50.
+- Busca de **longos** traz muito mais conteúdo brasileiro (geral: 26/50 com idioma PT; geral + português: 37/50).
+- Sem filtro, só ~25% declaram idioma PT (`regionCode=BR` = assistível, não brasileiro): o filtro Brasil é essencial.
+- RSS dos canais funciona a partir do GitHub Actions (10/10). Teste de Shorts via `youtube.com/shorts/ID` também (0 indefinidos em 80); o link do RSS também indica se é Short.
 - Primeiro dia: varredura completa de 24/48 h para encher o funil.
 - Extra: derivados (reacts/cortes que linkam o original) e rankings oficiais restantes.
 - Sem lista fixa de canais. Canais encontrados entram num cache automático; uploads novos deles via RSS (testar se o RSS ainda funciona; alternativa: 1 unidade por canal).
@@ -64,7 +75,7 @@ Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Vi
 2. **Dos seus canais:** vídeos recentes dos inscritos ordenados por desempenho (inclui fator canal). Lista de inscritos lida da conta, sem cota.
 3. **Em Alta** (score acima).
 4. **Mais vistos (24 h):** views **ganhas** nas últimas 24 h × fator Brasil; máx. 2 por canal.
-5. **Categorias nativas:** todos os candidatos coletados redistribuídos por categoria. Mostrar só as que tiverem volume mínimo; o usuário escolhe quais e em que ordem.
+5. **Categorias nativas** (14 no Brasil): todos os candidatos coletados redistribuídos por categoria. Mostrar só as que tiverem volume mínimo; o usuário escolhe quais e em que ordem.
 6. **Lives:** por espectadores simultâneos.
 7. **Dos amigos** (pilar 2).
 8. **Garimpo** (pilar 3).
