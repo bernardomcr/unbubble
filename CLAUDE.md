@@ -15,6 +15,8 @@ Fontes adicionais, como fileiras da home:
 
 Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Virar extensão oficial só depois que tudo funcionar.
 
+**Identidade visual (02/nov/2026):** logo "unbubble" em azul-céu (~`#4FADEA`), letras arredondadas grossas em minúsculas, e um símbolo de bolha tracejada sendo furada por uma agulha. Usar essa cor e esse estilo na home e nas páginas.
+
 ## Arquitetura
 
 - **Nada pessoal preso a um PC.** Bernardo usa dois PCs e pode formatar: o PC é só uma "janela"; formatou, instala Tampermonkey + script e cola um token, o resto volta sozinho.
@@ -149,8 +151,8 @@ Buscas usam filtro de duração (`videoDuration`) para não gastar resultados co
 ## Ordem de execução
 
 1. ~~Fase 1: coletor do Em Alta no GitHub Actions~~ (feito em 02/nov/2026: ranking público, página https://bernardomcr.github.io/unbubble/, curadoria de variedade). Segue rodando sozinho; calibração com o dataset fica para depois.
-2. **Agora:** repo privado `unbubble-pessoal` já criado; Bernardo cria a conta da API da Anthropic (crédito ~US$ 5, sem recarga automática) e guarda a chave como segredo do repo privado.
-3. **Raio-x da conta:** script de Tampermonkey que lê histórico (com % visto), inscritos e curtidas e envia ao repo privado; Sonnet gera um relatório (interesses ativos, adormecidos com exemplos, gavetas dos inscritos, 5–10 apostas novas com o porquê). Bernardo avalia se "é isso mesmo" antes de seguir. Opcional: comparar Haiku × Sonnet nos dados reais.
+2. ~~Conta da API da Anthropic~~ (feito: crédito US$ 5 sem recarga, chave `ANTHROPIC_API_KEY` no repo privado).
+3. **Raio-x da conta** (1ª versão feita em 02/nov/2026; **aguardando Bernardo avaliar** o relatório `relatorios/raiox.md` do repo privado). Captura feita no navegador do app (YouTube logado), pela API interna `/youtubei/v1/browse` (FEhistory, FEchannels, VLLL) rodando numa página sem CSP do youtube.com (`/robots.txt`) e enviando a um receptor local; dados em `dados/raiox/` do repo privado; o workflow `raiox.yml` gera o relatório com Sonnet (esforço médio; ~110 mil tokens de entrada, ~US$ 0,28). O histórico visível vai só até mar/2025 (~33 mil itens, 2/3 Shorts); Takeout pedido para buscas e anos anteriores. Lições: Sonnet com `max_tokens` 16 mil gastou tudo pensando (relatório vazio, US$ 0,51) → usar 32 mil + esforço médio + checar `stop_reason`. Pendências apontadas pelo relatório: lives/Shorts repetidos inflam o "100% visto"; trechos infantis podem ser de outra pessoa na conta. Depois: virar script de Tampermonkey para recapturar sozinho.
 4. Primeira fileira na home: **Dos seus canais** (favoritos + esquecidos voltando).
 5. Editor diário + feed em camadas + teto por tema nos recomendados do YouTube + Em Alta personalizado.
 6. Pilar 2 (amigos) e pilar 3 (garimpo).
