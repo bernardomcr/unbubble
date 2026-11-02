@@ -1,10 +1,10 @@
 name: Coletor
 
-# De hora em hora (minuto 7, para fugir do pico do GitHub no minuto 0).
+# De hora em hora (minuto 23, longe do pico do GitHub perto da hora cheia).
 # Os dados ficam na branch "dados", sobrescrita a cada execução (sem histórico acumulado).
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "23 * * * *"
   workflow_dispatch:
 
 permissions:
