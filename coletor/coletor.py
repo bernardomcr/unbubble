@@ -196,6 +196,9 @@ class Coletor:
 
         comentarios_lidos = 0
         contagem = {}
+        pendentes = []
+        # Mais vistos primeiro: se o limite de comentários acabar, sobram os menos relevantes
+        info.sort(key=lambda v: -int(v.get("statistics", {}).get("viewCount", 0)))
         for v in info:
             vid, s = v["id"], v["snippet"]
             ao_vivo = s.get("liveBroadcastContent")
@@ -220,19 +223,21 @@ class Coletor:
             else:
                 if comentarios_lidos >= MAX_COMENTARIOS_POR_EXECUCAO or \
                         self.unidades_usadas() >= MAX_UNIDADES_DIA:
-                    continue  # tenta de novo na próxima execução
+                    pendentes.append(vid)  # fica na fila para a próxima execução
+                    continue
                 comentarios_lidos += 1
                 try:
                     fator = brasil.fracao_br(yt.comentarios(vid))
                 except yt.ErroAPI as e:
                     self.log.append(f"comentários: {e}; parando de ler por hoje")
                     comentarios_lidos = MAX_COMENTARIOS_POR_EXECUCAO
+                    pendentes.append(vid)
                     continue
                 if fator is None:
                     fator = 0.5 if tipo == "ambiguo" else 0
                 if fator < brasil.CORTE_ESTRANGEIRO:
                     self.descartar(vid, "estrangeiro")
-                    contagem["estrangeiro"] = contagem.get("estrangeiro", 0) + 1
+                    contagem["descartado"] = contagem.get("descartado", 0) + 1
                     continue
             contagem[tipo] = contagem.get(tipo, 0) + 1
             if fator >= 0.5:
@@ -250,8 +255,9 @@ class Coletor:
                               int(st.get("likeCount", 0)), int(st.get("commentCount", 0))]],
                 "espectadores": int(v.get("liveStreamingDetails", {}).get("concurrentViewers", 0)),
             }
+        self.e["pendentes"] = pendentes[:MAX_CANDIDATOS]
         self.log.append(f"classificação de {len(info)} vídeos novos: {contagem} "
-                        f"({comentarios_lidos} leram comentários)")
+                        f"({comentarios_lidos} leram comentários; {len(pendentes)} na fila)")
 
     def descartar(self, vid, motivo):
         self.e["descartados"][vid] = [motivo, int(self.agora)]
@@ -330,6 +336,7 @@ class Coletor:
     def rodar(self):
         achados = self.descobrir()
         achados |= self.rss_canais()
+        achados |= set(self.e.pop("pendentes", []))
         antes = set(self.e["candidatos"])
         self.classificar(sorted(achados))
         self.acompanhar(set(self.e["candidatos"]) - antes)
