@@ -65,7 +65,14 @@ Buscas usam filtro de duração (`videoDuration`) para não gastar resultados co
 - Detecção sem IA: detector de idioma leve + marcadores PT-BR ("você", "a gente", "tá", "né", "pra", "kkkk", "celular", gerúndio "tô fazendo") vs PT-PT ("estou a fazer", "tu és", "fixe", "telemóvel", "autocarro", "ecrã", "equipa", "facto"). Mínimo ~20 comentários.
 - Comentários desativados: estrangeiro fica fora.
 
-**Score Em Alta:** log(views BR estimadas/hora) + 0,5·log(fator canal = views ÷ mediana do canal) + bônus de aceleração − penalidade de idade após 48 h. Bônus: explosão de assunto entre canais, engajamento acelerando, ranking oficial. Curadoria: máx. 1–2 por canal, rotatividade. Piso inicial: ~70% da mediana brasileira de entrada no antigo Em Alta (calcular no dataset abaixo). Pesos ajustados depois de 1–2 semanas rodando.
+**Score Em Alta:** log(views BR estimadas/hora) + 0,5·log(fator canal = views ÷ mediana do canal) + bônus de aceleração − penalidade de idade após 48 h. Bônus: explosão de assunto entre canais, engajamento acelerando, ranking oficial. Curadoria: máx. 1–2 por canal, rotatividade.
+
+**Curadoria de variedade (decidida em 02/nov/2026, após 1ª avaliação do Bernardo: "muito esporte"):**
+- Teto no Em Alta: **esporte, política/notícias e música no máximo 2 cada** (continuam completos nas fileiras das categorias). Demais temas: livres, mas no topo 20 nenhum tema passa de 3.
+- Tema pela classificação de assunto do YouTube (`topicDetails`), com a categoria como reforço (17 = esporte, 25 = política, 10 = música).
+- **Um vídeo por assunto:** mesmo jogo/acontecimento em vários canais conta uma vez (≥ 2 palavras raras do título em comum; só códigos das palavras ficam guardados).
+- Transmissões ao vivo já encerradas ficam fora do Em Alta.
+- Fator canal com peso 1,0 (era 0,5), comparando com o esperado para a idade do vídeo: favorece vídeo muito acima do normal do canal, como o antigo Em Alta. Piso inicial: ~70% da mediana brasileira de entrada no antigo Em Alta (calcular no dataset abaixo). Pesos ajustados depois de 1–2 semanas rodando.
 
 **Calibração:** dataset "Global YouTube Trending Dataset (2022–2025)", DOI 10.13012/B2IDB-9307654 (inclui BR e PT; 4 capturas/dia; views e comentários). Só tem vídeos que entraram no Em Alta: usar para pisos e perfil de entrada, não para teste de acerto. Uso restrito a pesquisa: só extrair números de referência, não redistribuir.
 

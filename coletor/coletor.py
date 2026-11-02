@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import brasil
+import curadoria
 import ranking
 import yt
 
@@ -184,7 +185,7 @@ class Coletor:
         ids = [i for i in ids if i not in self.e["candidatos"] and i not in self.e["descartados"]]
         if not ids:
             return
-        info = yt.videos(ids, part="snippet,contentDetails,statistics,liveStreamingDetails")
+        info = yt.videos(ids, part="snippet,contentDetails,statistics,liveStreamingDetails,topicDetails")
         vistos = {v["id"] for v in info}
         for i in set(ids) - vistos:
             self.descartar(i, "indisponivel")
@@ -255,6 +256,7 @@ class Coletor:
                               int(st.get("likeCount", 0)), int(st.get("commentCount", 0))]],
                 "espectadores": int(v.get("liveStreamingDetails", {}).get("concurrentViewers", 0)),
             }
+            self.e["candidatos"][vid].update(curadoria.marcas(v))
         self.e["pendentes"] = pendentes[:MAX_CANDIDATOS]
         self.log.append(f"classificação de {len(info)} vídeos novos: {contagem} "
                         f"({comentarios_lidos} leram comentários; {len(pendentes)} na fila)")
@@ -267,7 +269,9 @@ class Coletor:
         ids = [i for i in self.e["candidatos"] if i not in novos]
         if not ids:
             return
-        info = {v["id"]: v for v in yt.videos(ids, part="statistics,liveStreamingDetails")}
+        # snippet e topicDetails não custam a mais: atualizam tema, assunto e "transmissão encerrada"
+        info = {v["id"]: v for v in yt.videos(
+            ids, part="snippet,statistics,liveStreamingDetails,topicDetails")}
         sumiram = 0
         for vid in ids:
             c = self.e["candidatos"][vid]
@@ -285,6 +289,7 @@ class Coletor:
                                   int(st.get("likeCount", 0)), int(st.get("commentCount", 0))])
             c["leituras"] = [l for l in c["leituras"] if self.agora - l[0] <= 26 * 3600]
             c["espectadores"] = int(lsd.get("concurrentViewers", 0))
+            c.update(curadoria.marcas(v))
         self.log.append(f"acompanhamento: {len(ids)} candidatos, {sumiram} sumiram")
 
     # ---------- 5. fator canal ----------

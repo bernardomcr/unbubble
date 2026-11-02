@@ -1,15 +1,19 @@
 """Score do Em Alta e montagem das fileiras publicadas (só IDs e números).
 
-Score = log(views BR/hora) + 0,5·log(fator canal) + bônus de aceleração − penalidade de idade.
+Score = log(views BR/hora) + 1,0·log(fator canal) + bônus de aceleração − penalidade de idade.
+A seleção do Em Alta (variedade de temas e assuntos) fica em curadoria.py.
 Pesos iniciais; ajustar depois de 1–2 semanas rodando (ver CLAUDE.md).
 """
 import math
 from datetime import datetime, timezone
 
+import curadoria
+
 POR_CANAL = 2
 TAMANHO = {"em_alta": 50, "mais_vistos_24h": 50, "categoria": 30, "lives": 30}
 MIN_CATEGORIA = 10
 JANELA_VELOCIDADE_H = 3
+PESO_CANAL = 1.0  # era 0,5; mais peso para vídeo muito acima do normal do canal
 
 
 def _ts(iso):
@@ -45,16 +49,23 @@ def aceleracao(c):
     return recente / anterior
 
 
+def curva_idade(idade_h):
+    """Fração das views "finais" que um vídeo típico já tem com essa idade (chute inicial: 48 h ≈ 100%)."""
+    return min(max((idade_h / 48) ** 0.6, 0.05), 1)
+
+
 def score(c, mediana_canal, agora):
     vel_br = velocidade(c, agora) * c["br"]
     s = math.log10(max(vel_br, 1))
+    idade_h = (agora - _ts(c["publicado"])) / 3600
     if mediana_canal:
-        fator = c["leituras"][-1][1] / mediana_canal
-        s += 0.5 * math.log10(min(max(fator, 0.1), 100))
+        # Compara com o que um vídeo típico do canal teria na mesma idade (curva aproximada)
+        esperado = mediana_canal * curva_idade(idade_h)
+        fator = c["leituras"][-1][1] / max(esperado, 1)
+        s += PESO_CANAL * math.log10(min(max(fator, 0.1), 100))
     acel = aceleracao(c)
     if acel and acel > 1:
         s += min(0.5 * math.log10(acel), 0.5)
-    idade_h = (agora - _ts(c["publicado"])) / 3600
     if idade_h > 48:
         s -= 0.5 * (idade_h - 48) / 24
     return s
@@ -94,7 +105,8 @@ def gerar(estado, agora):
     ordem = sorted(pontos, key=pontos.get, reverse=True)
     canal_de = lambda vid: cands[vid]["canal"]  # noqa: E731
 
-    em_alta = _limitar(ordem, canal_de, TAMANHO["em_alta"])
+    em_alta = curadoria.selecionar(ordem, cands, TAMANHO["em_alta"],
+                                   curadoria.palavras_comuns(videos.values()))
 
     ganhos = {vid: views_24h(c, agora) for vid, c in videos.items()}
     ganhos = {vid: g * videos[vid]["br"] for vid, g in ganhos.items() if g}
