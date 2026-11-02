@@ -19,7 +19,7 @@ Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Vi
 
 - **Nada pessoal preso a um PC.** Bernardo usa dois PCs e pode formatar: o PC é só uma "janela"; formatou, instala Tampermonkey + script e cola um token, o resto volta sozinho.
 - **Repo público `bernardomcr/unbubble`:** código do script (atualização automática via `@updateURL`), coletor do Em Alta, ranking público (só IDs e números, branch `dados`) e página de avaliação (GitHub Pages, `docs/`).
-- **Repo privado `bernardomcr/unbubble-pessoal` (a criar):** dados pessoais (histórico resumido, mapa de interesses, cliques/tempo assistido, tema de cada canal, notas de afinidade, gasto da IA) e a **chave da API de IA como segredo**. A IA roda em GitHub Actions desse repo; nenhum PC guarda a chave. Histórico **nunca** vai para o repo público.
+- **Repo privado `bernardomcr/unbubble-pessoal` (criado em 02/nov/2026, privado):** dados pessoais (histórico resumido, mapa de interesses, cliques/tempo assistido, tema de cada canal, notas de afinidade, gasto da IA) e a **chave da API de IA como segredo**. A IA roda em GitHub Actions desse repo; nenhum PC guarda a chave. Histórico **nunca** vai para o repo público.
 - **Script no navegador:** lê o que só existe logado (histórico com barra de progresso, inscritos, curtidas, buscas, chips da home, recomendados), registra cliques e tempo assistido, envia ao repo privado com um token de acesso restrito a ele, e desenha a home a partir do resultado. Cópia local só como cache.
 - **Coletor do Em Alta (servidor):** GitHub Actions de hora em hora no repo público. Migrar para VPS só se necessário.
 - **Banco dos amigos (pilar 2, futuro):** Google Apps Script + planilha, protegido por senha do grupo.
@@ -148,7 +148,7 @@ Buscas usam filtro de duração (`videoDuration`) para não gastar resultados co
 ## Ordem de execução
 
 1. ~~Fase 1: coletor do Em Alta no GitHub Actions~~ (feito em 02/nov/2026: ranking público, página https://bernardomcr.github.io/unbubble/, curadoria de variedade). Segue rodando sozinho; calibração com o dataset fica para depois.
-2. **Agora:** criar o repo privado `unbubble-pessoal`; Bernardo cria a conta da API da Anthropic (crédito ~US$ 5, sem recarga automática) e guarda a chave como segredo do repo privado.
+2. **Agora:** repo privado `unbubble-pessoal` já criado; Bernardo cria a conta da API da Anthropic (crédito ~US$ 5, sem recarga automática) e guarda a chave como segredo do repo privado.
 3. **Raio-x da conta:** script de Tampermonkey que lê histórico (com % visto), inscritos e curtidas e envia ao repo privado; Sonnet gera um relatório (interesses ativos, adormecidos com exemplos, gavetas dos inscritos, 5–10 apostas novas com o porquê). Bernardo avalia se "é isso mesmo" antes de seguir. Opcional: comparar Haiku × Sonnet nos dados reais.
 4. Primeira fileira na home: **Dos seus canais** (favoritos + esquecidos voltando).
 5. Editor diário + feed em camadas + teto por tema nos recomendados do YouTube + Em Alta personalizado.
