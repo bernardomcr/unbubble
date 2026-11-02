@@ -23,6 +23,13 @@ class TestTema(unittest.TestCase):
         humor = {"snippet": {"categoryId": "23"},
                  "topicDetails": {"topicCategories": ["https://en.wikipedia.org/wiki/Humour"]}}
         self.assertEqual(curadoria.tema(humor), "Humour")
+        disfarcado = {"snippet": {"categoryId": "10", "title": "Governo Lula classifica desenho como impróprio"},
+                      "topicDetails": {"topicCategories": ["https://en.wikipedia.org/wiki/Lifestyle_(sociology)"]}}
+        self.assertEqual(curadoria.tema(disfarcado), "politica")
+        jogo = {"snippet": {"categoryId": "17", "title": "Presidente do clube fala após jogo"}}
+        self.assertEqual(curadoria.tema(jogo), "esporte")  # esporte tem prioridade
+        vlog = {"snippet": {"categoryId": "22", "title": "Fomos embora da África! Vlog dia 2"}}
+        self.assertEqual(curadoria.tema(vlog), "cat22")
 
     def test_assinatura_nao_guarda_texto(self):
         a = curadoria.assinatura("Palmeiras x Vasco ao vivo")

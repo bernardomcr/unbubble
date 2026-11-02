@@ -23,6 +23,12 @@ ESPORTES = {
     "Cricket", "Golf", "Ice_hockey", "Mixed_martial_arts", "Motorsport", "Professional_wrestling",
     "Rugby_football", "Tennis", "Volleyball",
 }
+# O YouTube às vezes classifica vídeo político como "estilo de vida" ou "sociedade": reforço pelo título
+RE_POLITICA = re.compile(
+    r"\b(lula|bolsonaro|bolsonarista|petista|governo|presidente|ministr[oa]|minist[ée]rio|stf|"
+    r"moraes|senado|senador[a]?|c[âa]mara|deputad[oa]|congresso|elei[çc][ãa]o|elei[çc][õo]es|"
+    r"eleitoral|direita|esquerda|janones|tarc[íi]sio|haddad|planalto|impeachment|anistia|trump)\b",
+    re.IGNORECASE)
 PARADAS = {
     "que", "com", "para", "pra", "por", "uma", "uns", "dos", "das", "nos", "nas", "não", "nao",
     "mais", "como", "seu", "sua", "the", "and", "you", "isso", "esse", "essa", "este", "esta",
@@ -36,7 +42,8 @@ def tema(video):
     cat = video.get("snippet", {}).get("categoryId")
     if cat == "17" or any(n in ESPORTES for n in nomes):
         return "esporte"
-    if cat == "25" or "Politics" in nomes:
+    titulo = video.get("snippet", {}).get("title", "")
+    if cat == "25" or "Politics" in nomes or RE_POLITICA.search(titulo):
         return "politica"
     if cat == "10" or any("music" in n.lower() for n in nomes):
         return "musica"
