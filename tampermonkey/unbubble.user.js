@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.4.1
+// @version      0.4.2
 // @description  Home anti-bolha do YouTube: fileiras Dos seus canais, Em Alta e Mais vistos, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -237,7 +237,7 @@
     #unbubble .ub-cab { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; }
     #unbubble .ub-titulo { font-size: 2rem; font-weight: 700; color: var(--ub-texto); margin: 0; }
     #unbubble .ub-marca { font-size: 1.2rem; font-weight: 700; color: ${COR}; letter-spacing: .02em; }
-    #unbubble .ub-sub { font-size: 1.3rem; color: var(--ub-texto2); }
+    #unbubble .ub-bolha { width: 12px; height: 12px; border: 2px dashed ${COR}; border-radius: 50%; flex: none; align-self: center; }
     #unbubble .ub-trilho { display: grid; grid-auto-flow: column; grid-auto-columns: 260px;
       gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; }
     #unbubble .ub-card { scroll-snap-align: start; text-decoration: none; color: inherit; display: block; min-width: 0; }
@@ -298,14 +298,10 @@
   function desenharFileiras(caixa, home) {
     for (const f of home.fileiras) {
       if (!f.itens || !f.itens.length) continue;
-      const esq = f.itens.filter(i => i.motivo === 'esquecido').length;
-      const sub = f.id === 'seus_canais' ? (esq ? `${esq} de canais que você deixou de ver` : '')
-        : 'os primeiros como estão; o resto na ordem do que combina com você';
       caixa.append(
         el('div', { class: 'ub-cab' },
-          el('h2', { class: 'ub-titulo' }, f.titulo),
-          el('span', { class: 'ub-marca' }, 'unbubble'),
-          el('span', { class: 'ub-sub' }, sub)),
+          el('span', { class: 'ub-bolha', title: 'fileira do unbubble' }),
+          el('h2', { class: 'ub-titulo' }, f.titulo)),
         el('div', { class: 'ub-trilho' }, ...f.itens.map(i => card(i, f.id))));
     }
   }
@@ -448,7 +444,6 @@
       } else {
         const home = await lerHome();
         if (home) desenharFileiras(caixa, home);  // falhou e sem cache: sem fileiras, mas o teto ainda vale
-        caixa.append(el('div', { class: 'ub-aviso', id: 'ub-teto' }));
       }
       if (document.getElementById('unbubble')) return;
       // mesma largura e recuo da grade de vídeos do YouTube
