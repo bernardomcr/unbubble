@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.9.0
+// @version      0.9.1
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -363,11 +363,13 @@
     #unbubble { --ub-texto: #0f0f0f; --ub-texto2: #606060; --ub-fundo-capa: #e5e5e5;
       --ub-botao: #ffffff; --ub-menu: #ffffff; --ub-hover: rgba(0,0,0,.08);
       --ub-chip: rgba(0,0,0,.05); --ub-chip-hover: rgba(0,0,0,.1); --ub-fundo: #ffffff;
+      --ub-seta-fundo: rgba(255,255,255,.45); --ub-seta-borda: rgba(255,255,255,.6);
       align-self: stretch; min-width: 0; box-sizing: border-box; margin: 16px 0 24px;
       font-family: Roboto, Arial, sans-serif; }
     html[dark] #unbubble { --ub-texto: #f1f1f1; --ub-texto2: #aaaaaa; --ub-fundo-capa: #272727;
       --ub-botao: #212121; --ub-menu: #282828; --ub-hover: rgba(255,255,255,.1);
-      --ub-chip: rgba(255,255,255,.1); --ub-chip-hover: rgba(255,255,255,.2); --ub-fundo: #0f0f0f; }
+      --ub-chip: rgba(255,255,255,.1); --ub-chip-hover: rgba(255,255,255,.2); --ub-fundo: #0f0f0f;
+      --ub-seta-fundo: rgba(20,20,20,.35); --ub-seta-borda: rgba(255,255,255,.18); }
     #unbubble .ub-cab { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; }
     #unbubble .ub-titulo { font-size: 2rem; line-height: 2.8rem; font-weight: 700; color: var(--ub-texto); margin: 0; }
     #unbubble .ub-marca { font-size: 1.2rem; font-weight: 700; color: ${COR}; letter-spacing: .02em; }
@@ -378,8 +380,6 @@
     #unbubble .ub-palco { min-height: 290px; }
     #unbubble .ub-palco .ub-fileira { margin: 0; }
     #unbubble .ub-palco .ub-cab { display: none; }
-    #unbubble .ub-palco .ub-trilho { grid-auto-columns: 300px; }
-    #unbubble .ub-palco .ub-seta { top: 84px; }
     #unbubble .ub-carregando { height: 250px; display: flex; align-items: center; justify-content: center;
       font-size: 1.4rem; color: var(--ub-texto2); }
     #unbubble .ub-botoes { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 10px; margin: 32px 0 0; }
@@ -393,13 +393,17 @@
       gap: 16px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
     #unbubble .ub-trilho::-webkit-scrollbar { display: none; }
     #unbubble .ub-seta { position: absolute; top: 73px; transform: translateY(-50%); z-index: 3;
-      width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
-      background: var(--ub-botao); color: var(--ub-texto); display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 4px 4px rgba(0,0,0,.3), 0 0 4px rgba(0,0,0,.2);
-      opacity: 0; pointer-events: none; transition: opacity .2s; }
-    #unbubble .ub-seta svg { width: 24px; height: 24px; fill: currentColor; pointer-events: none; }
-    #unbubble .ub-seta.dir { right: -20px; }
-    #unbubble .ub-seta.esq { left: -20px; }
+      width: 56px; height: 56px; border-radius: 50%; padding: 0; cursor: pointer;
+      border: 1px solid var(--ub-seta-borda); background: var(--ub-seta-fundo); color: var(--ub-texto);
+      -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 6px 18px rgba(0,0,0,.25);
+      opacity: 0; pointer-events: none; transition: opacity .2s, transform .15s; }
+    #unbubble .ub-seta:hover { transform: translateY(-50%) scale(1.06); }
+    #unbubble .ub-seta svg { width: 32px; height: 32px; fill: currentColor; pointer-events: none; }
+    /* por cima do último vídeo, que só aparece pela metade (não é para clicar nele mesmo) */
+    #unbubble .ub-seta.dir { right: 28px; }
+    #unbubble .ub-seta.esq { left: 28px; }
     #unbubble .ub-seta.esq svg { transform: scaleX(-1); }
     #unbubble .ub-seta.dir.ativa, #unbubble .ub-linha:hover .ub-seta.esq.ativa { opacity: 1; pointer-events: auto; }
     #unbubble .ub-card { scroll-snap-align: start; min-width: 0; position: relative; }
@@ -436,7 +440,7 @@
     #unbubble .ub-aviso { font-size: 1.4rem; color: var(--ub-texto2); }
     #unbubble button { background: ${COR}; color: #fff; border: 0; border-radius: 999px; padding: 6px 14px;
       font-size: 1.3rem; font-weight: 600; cursor: pointer; }
-    #unbubble button.ub-seta, #unbubble button.ub-mais { background: var(--ub-botao); }
+    #unbubble button.ub-seta { background: var(--ub-seta-fundo); }
     #unbubble button.ub-mais { background: transparent; }
   `;
 
@@ -580,11 +584,26 @@
           .finally(() => { carregando = false; atualizar(); });
       }
     };
-    const passo = () => Math.max(trilho.clientWidth - 276, 276);
+    // Largura dos vídeos ajustada à tela: N inteiros + o último aparecendo uns 40% (não é para clicar nele);
+    // a seta da direita fica no meio desse pedaço, e a da esquerda na mesma distância da borda.
+    const GAP = 16, ALVO = 300, PEDACO = 0.4;
+    let coluna = ALVO;
+    const ajustar = () => {
+      const w = trilho.clientWidth;
+      if (!w) return;
+      const n = Math.max(1, Math.floor((w + GAP) / (ALVO + GAP)));
+      coluna = (w - n * GAP) / (n + PEDACO);
+      trilho.style.gridAutoColumns = `${coluna}px`;
+      const lado = `${Math.max((PEDACO * coluna) / 2 - 28, 8)}px`;
+      dir.style.right = lado;
+      esq.style.left = lado;
+      dir.style.top = esq.style.top = `${(coluna * 9) / 16 / 2}px`;
+    };
+    const passo = () => Math.max(Math.floor(trilho.clientWidth / (coluna + GAP)), 1) * (coluna + GAP);
     esq.addEventListener('click', () => trilho.scrollBy({ left: -passo(), behavior: 'smooth' }));
     dir.addEventListener('click', () => trilho.scrollBy({ left: passo(), behavior: 'smooth' }));
     trilho.addEventListener('scroll', atualizar, { passive: true });
-    new ResizeObserver(atualizar).observe(trilho);
+    new ResizeObserver(() => { ajustar(); atualizar(); }).observe(trilho);
     sec._vazia = () => !trilho.children.length;
     return sec;
   }
