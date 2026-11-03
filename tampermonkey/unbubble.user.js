@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.7.0
+// @version      0.8.0
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -223,11 +223,72 @@
     }
   }
 
-  // ---------- Registro local de cliques (para o aprendizado depois) ----------
+  // ---------- Uso: o que foi mostrado e o que foi clicado nas nossas fileiras (para aprender) ----------
+  // Mostrado = o vídeo ficou visível na tela (conta 1 vez por abertura da home). Vai para dados/uso/eventos.json
+  // a cada hora, juntando com o que já estiver lá (os dois PCs somam). O GitHub tira o que foi ignorado ~3 vezes
+  // e dá mais espaço ao rumo em que ele clica; o Sonnet da semana vê o desempenho de cada rumo.
+  const ENVIO_USO_MIN = 60;
+  const GUARDA_USO_DIAS = 30;
+  const mostradosNestaPagina = new Set();
+
   function registrarClique(item, fileira) {
     const cliques = GM_getValue('cliques', []);
-    cliques.push({ id: item.id, canal_id: item.canal_id, fileira, motivo: item.motivo, em: new Date().toISOString() });
+    cliques.push({ id: item.id, titulo: item.titulo || '', canal: item.canal || '', canal_id: item.canal_id || '',
+                   fileira, motivo: item.motivo || '', em: new Date().toISOString() });
     GM_setValue('cliques', cliques.slice(-2000));
+    GM_setValue('uso_novo', true);
+  }
+
+  function registrarMostrado(id, fileira) {
+    if (fileira.startsWith('yt_') || mostradosNestaPagina.has(id)) return;  // só as nossas fileiras
+    mostradosNestaPagina.add(id);
+    const m = GM_getValue('mostrados', {});
+    const hoje = new Date().toISOString().slice(0, 10);
+    const r = m[id] || { n: 0, fileira, primeiro: hoje };
+    r.n++; r.ultimo = hoje; r.fileira = fileira;
+    m[id] = r;
+    GM_setValue('mostrados', m);
+    GM_setValue('uso_novo', true);
+  }
+
+  const olhoDaTela = new IntersectionObserver(entradas => {
+    for (const e of entradas) {
+      if (!e.isIntersecting) continue;
+      olhoDaTela.unobserve(e.target);
+      registrarMostrado(e.target.dataset.id, e.target.dataset.fileira);
+    }
+  }, { threshold: 0.6 });
+
+  async function enviarUsoSeHora() {
+    if (!GM_getValue('token', '') || !GM_getValue('uso_novo', false)) return;  // nada novo: não refaz a home à toa
+    if (agora() - GM_getValue('ultimo_envio_uso', 0) < ENVIO_USO_MIN * 60e3) return;
+    GM_setValue('ultimo_envio_uso', agora());
+    GM_setValue('uso_novo', false);
+    const caminho = 'contents/dados/uso/eventos.json';
+    let sha, remoto = { cliques: [], mostrados: {} };
+    try {
+      const r = JSON.parse(await github('GET', caminho, null, { json: true }));
+      sha = r.sha;
+      remoto = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(r.content.replace(/\n/g, '')), c => c.charCodeAt(0))));
+    } catch (e) { /* ainda não existe */ }
+    const limite = new Date(agora() - GUARDA_USO_DIAS * 864e5).toISOString();
+    const cliques = new Map();
+    for (const c of [...(remoto.cliques || []), ...GM_getValue('cliques', [])]) if (c.em >= limite) cliques.set(`${c.id}|${c.em}`, c);
+    const mostrados = { ...(remoto.mostrados || {}) };
+    for (const [id, r] of Object.entries(GM_getValue('mostrados', {}))) {
+      const o = mostrados[id];
+      mostrados[id] = o ? { ...r, n: Math.max(o.n, r.n), primeiro: o.primeiro < r.primeiro ? o.primeiro : r.primeiro,
+                            ultimo: o.ultimo > r.ultimo ? o.ultimo : r.ultimo } : r;
+    }
+    for (const [id, r] of Object.entries(mostrados)) if (r.ultimo < limite.slice(0, 10)) delete mostrados[id];
+    const uso = { atualizado_em: new Date().toISOString(), cliques: [...cliques.values()].sort((a, b) => (a.em < b.em ? -1 : 1)), mostrados };
+    await github('PUT', caminho, {
+      message: `Uso das fileiras (${uso.cliques.length} cliques, ${Object.keys(mostrados).length} mostrados)`,
+      content: base64(JSON.stringify(uso)), ...(sha ? { sha } : {}),
+    }, { json: true, tempo: 30000 });
+    GM_setValue('cliques', uso.cliques);   // agora o navegador tem também o do outro PC
+    GM_setValue('mostrados', mostrados);
+    log(`uso enviado: ${uso.cliques.length} cliques, ${Object.keys(mostrados).length} mostrados`);
   }
 
   // ---------- "Não tenho interesse" ----------
@@ -478,7 +539,11 @@
       for (const i of lista) {
         if (!i?.id || ids.has(i.id) || bloqueado(i)) continue;
         ids.add(i.id);
-        trilho.append(card(i, id));
+        const c = card(i, id);
+        c.dataset.id = i.id;
+        c.dataset.fileira = id;
+        trilho.append(c);
+        olhoDaTela.observe(c);
       }
     };
     por(itens);
@@ -871,4 +936,6 @@
   montar();
   setTimeout(() => capturarSeHora(), 8000);  // depois da página carregar, sem atrapalhar
   setTimeout(() => coletarFuraSeHora(), 20000);
+  setInterval(() => enviarUsoSeHora().catch(e => log('não consegui mandar o uso:', e.message)), 5 * 60e3);
+  setTimeout(() => enviarUsoSeHora().catch(e => log('não consegui mandar o uso:', e.message)), 30000);
 })();
