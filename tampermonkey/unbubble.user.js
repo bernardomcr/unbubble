@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.7
+// @version      0.11.8
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1104,11 +1104,12 @@
   const CSS_ASSISTIR = `
     /* Modo padrão: vídeo à esquerda ocupando o que sobra, sugestões numa coluna estreita encostada na borda direita */
     html[ub-assistir] ytd-watch-flexy #columns { display: flex !important; flex-direction: row !important;
-      justify-content: space-between !important; max-width: none !important; margin: 0 !important; padding: 0 24px !important; }
+      justify-content: space-between !important; max-width: none !important; margin: 0 !important; padding: 0 24px !important;
+      box-sizing: border-box !important; }
     html[ub-assistir] ytd-watch-flexy #primary { flex: 1 1 auto !important; min-width: 0 !important; width: auto !important;
       max-width: none !important; margin: 0 !important; padding: 0 !important; }
     html[ub-assistir] ytd-watch-flexy #secondary { position: static !important; display: block !important;
-      width: 340px !important; flex: 0 0 340px !important; min-width: 0 !important; left: auto !important; right: auto !important;
+      width: auto !important; flex: 1 1 340px !important; min-width: 340px !important; max-width: 440px !important; left: auto !important; right: auto !important;
       top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
       visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
     html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; pointer-events: auto !important; }
@@ -1120,8 +1121,8 @@
     html[ub-assistir][ub-teatro] ytd-watch-flexy #below { grid-column: 1; grid-row: 2; min-width: 0; }
     html[ub-assistir] ytd-watch-flexy #below > div { width: auto !important; max-width: none !important; min-width: 0 !important;
       margin-left: 0 !important; margin-right: 0 !important; }
-    /* teatro: o vídeo o maior possível, mas deixando à vista a faixa do título, canal e botões (o YouTube limita a janela − 192 px) */
-    html[ub-assistir][ub-teatro] ytd-watch-flexy { --ytd-watch-flexy-max-player-height: calc(100vh - 56px - 112px) !important;
+    /* nos dois modos: o vídeo o maior possível, mas deixando à vista a faixa do título, canal e botões (o YouTube limita a janela − 192 px) */
+    html[ub-assistir] ytd-watch-flexy { --ytd-watch-flexy-max-player-height: calc(100vh - 56px - 112px) !important;
       --ytd-watch-flexy-max-player-width: calc((100vh - 56px - 112px) * 16 / 9) !important; }
     /* a linha do título (com views e botões) vai até a borda direita do vídeo; as sugestões começam abaixo dela */
     html[ub-assistir][ub-teatro] ytd-watch-flexy ytd-watch-metadata { width: calc(100% + 364px) !important; max-width: none !important; }
@@ -1526,6 +1527,12 @@
     clearTimeout(medida);
     if (!document.documentElement.hasAttribute('ub-assistir')) return;
     const teatro = document.documentElement.hasAttribute('ub-teatro');
+    // Padrão: as colunas vão até a borda da tela. Logado, o YouTube reserva à direita o espaço da barrinha lateral
+    // dele (Descrição/Comentários/Perguntar), que está escondida; sem isto a lista não encosta na borda.
+    if (!teatro) {
+      const esq = cols.getBoundingClientRect().left;
+      cols.style.setProperty('width', `${Math.round(document.documentElement.clientWidth - esq)}px`, 'important');
+    }
     medida = setTimeout(() => {
       const w = document.querySelector('ytd-watch-flexy .html5-video-player')?.getBoundingClientRect().width;
       const alvo = teatro ? cols : prim;
