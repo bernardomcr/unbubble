@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.2
+// @version      0.11.3
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1111,8 +1111,8 @@
     html[ub-assistir] ytd-watch-flexy #secondary { position: static !important; display: block !important;
       width: 340px !important; flex: 0 0 340px !important; min-width: 0 !important; left: auto !important; right: auto !important;
       top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
-      visibility: visible !important; opacity: 1 !important; }
-    html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; }
+      visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
+    html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; pointer-events: auto !important; }
     /* Modo teatro: vídeo na largura toda; embaixo, título/descrição/comentários à esquerda e sugestões à direita */
     html[ub-assistir][ub-teatro] ytd-watch-flexy #columns { display: grid !important; grid-template-columns: minmax(0, 1fr) 340px;
       column-gap: 24px; width: min(100% - 48px, (100vh - 192px) * 16 / 9) !important; margin: 0 auto !important; padding: 0 !important; }
