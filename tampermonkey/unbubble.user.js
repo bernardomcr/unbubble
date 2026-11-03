@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.0
+// @version      0.11.1
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1102,14 +1102,25 @@
   // Duas colunas: vídeo à esquerda e, embaixo dele, a descrição aberta e os comentários; à direita, sugestões
   // pequenas do mesmo grupo. Nada disso some do YouTube original: só esconde a grade de recomendados e os painéis.
   const CSS_ASSISTIR = `
+    /* Modo padrão: vídeo à esquerda ocupando o que sobra, sugestões numa coluna estreita encostada na borda direita */
     html[ub-assistir] ytd-watch-flexy #columns { display: flex !important; flex-direction: row !important;
-      justify-content: center !important; max-width: 1560px !important; margin: 0 auto !important; }
-    html[ub-assistir] ytd-watch-flexy #primary { flex: 1 1 auto !important; min-width: 0 !important;
-      max-width: min(1100px, calc(100% - 450px)) !important; }
+      justify-content: space-between !important; max-width: none !important; margin: 0 !important; padding: 0 24px !important; }
+    html[ub-assistir] ytd-watch-flexy #primary { flex: 1 1 auto !important; min-width: 0 !important; width: auto !important;
+      max-width: none !important; margin: 0 !important; padding: 0 !important; }
+    html[ub-assistir] ytd-watch-flexy #player { max-width: calc((100vh - 150px) * 16 / 9); }
     html[ub-assistir] ytd-watch-flexy #secondary { position: static !important; display: block !important;
-      width: 402px !important; flex: 0 0 402px !important; left: auto !important; right: auto !important;
+      width: 340px !important; flex: 0 0 340px !important; min-width: 0 !important; left: auto !important; right: auto !important;
       top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
       visibility: visible !important; opacity: 1 !important; }
+    html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; }
+    /* Modo teatro: vídeo na largura toda; embaixo, título/descrição/comentários à esquerda e sugestões à direita */
+    html[ub-assistir][ub-teatro] ytd-watch-flexy #columns { display: grid !important; grid-template-columns: minmax(0, 1fr) 340px;
+      column-gap: 24px; }
+    html[ub-assistir][ub-teatro] ytd-watch-flexy #primary, html[ub-assistir][ub-teatro] ytd-watch-flexy #primary-inner { display: contents !important; }
+    html[ub-assistir][ub-teatro] ytd-watch-flexy #player { grid-column: 1 / -1; grid-row: 1; width: 100%;
+      max-width: calc((100vh - 120px) * 16 / 9); justify-self: center; }
+    html[ub-assistir][ub-teatro] ytd-watch-flexy #below { grid-column: 1; grid-row: 2; min-width: 0; }
+    html[ub-assistir][ub-teatro] ytd-watch-flexy #secondary { grid-column: 2; grid-row: 2; width: auto !important; margin: 0 !important; }
     html[ub-assistir] ytd-watch-flexy #related, html[ub-assistir] ytd-watch-flexy #secondary #panels,
     html[ub-assistir] ytd-watch-flexy ytd-comments#comments, html[ub-assistir] ytd-watch-metadata #description,
     html[ub-assistir] ytd-watch-flexy #secondary ytd-watch-next-secondary-results-renderer,
@@ -1132,18 +1143,22 @@
     .ub2-botao:hover { color: var(--ub2-texto); }
     #ub-coments h3 { font-size: 13px; font-weight: bold; margin: 0 0 12px; }
     #ub-coments h3 span { color: var(--ub2-texto2); font-weight: normal; }
-    .ub2-com { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--ub2-borda); }
+    .ub2-com { display: flex; gap: 12px; padding: 18px 0; border-top: 1px solid var(--ub2-borda); }
     .ub2-com img { width: 48px; height: 48px; flex: none; background: var(--ub2-borda); }
     .ub2-com .ub2-autor { font-weight: bold; }
     .ub2-com .ub2-quando { color: var(--ub2-texto2); margin-left: 6px; font-size: 11px; }
     .ub2-com .ub2-texto { white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0 4px; }
-    .ub2-com .ub2-rodape { color: var(--ub2-texto2); font-size: 11px; }
+    .ub2-com .ub2-rodape { color: var(--ub2-texto2); font-size: 11px; display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    .ub2-like { background: transparent; border: 1px solid var(--ub2-borda); border-radius: 2px; color: var(--ub2-texto2);
+      font: 11px Arial, sans-serif; padding: 2px 8px; cursor: pointer; }
+    .ub2-like:hover { color: var(--ub2-texto); border-color: var(--ub2-texto2); }
+    .ub2-like.curtido { color: var(--ub2-link); border-color: var(--ub2-link); }
     #ub-lateral { margin: 0 0 16px; font-size: 13px; }
     #ub-lateral .ub2-titulo { font-weight: bold; margin: 0 0 8px; padding: 0 0 6px; border-bottom: 1px solid var(--ub2-borda); }
     #ub-lateral .ub2-titulo span { color: var(--ub2-texto2); font-weight: normal; }
     .ub2-sug { display: flex; gap: 8px; padding: 4px; margin: 0 0 4px; border-radius: 2px; color: inherit !important; }
     .ub2-sug:hover { background: var(--ub2-fundo); text-decoration: none !important; }
-    .ub2-sug .ub2-mini { position: relative; width: 168px; height: 94px; flex: none; background: var(--ub2-borda); overflow: hidden; }
+    .ub2-sug .ub2-mini { position: relative; width: 150px; height: 84px; flex: none; background: var(--ub2-borda); overflow: hidden; }
     .ub2-sug .ub2-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .ub2-sug .ub2-nome { font-weight: bold; color: var(--ub2-texto); display: -webkit-box; -webkit-line-clamp: 2;
       -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
@@ -1197,12 +1212,53 @@
     return caixa;
   }
 
+  // Os comentários vêm em "entidades" separadas (texto, barra de ações, estado do like); a ordem certa é a dos
+  // commentViewModel, que apontam para elas pelas chaves.
   function comentariosDe(j) {
-    return achar(j, 'commentEntityPayload').map(e => ({
-      autor: e.author?.displayName || '', canal: e.author?.channelId || '', foto: e.author?.avatarThumbnailUrl || '',
-      texto: e.properties?.content?.content || '', quando: e.properties?.publishedTime || '',
-      likes: e.toolbar?.likeCountNotliked || '', respostas: e.toolbar?.replyCount || '',
-    }));
+    const ent = {};
+    for (const m of achar(j, 'mutations').flat()) {
+      const p = m?.payload || {};
+      const tipo = Object.keys(p)[0];
+      if (tipo && p[tipo]?.key) ent[p[tipo].key] = p[tipo];
+    }
+    const acao = cmd => cmd?.innertubeCommand?.performCommentActionEndpoint?.action || null;
+    return achar(j, 'commentViewModel').filter(v => v.commentKey && ent[v.commentKey]).map(v => {
+      const e = ent[v.commentKey], barra = ent[v.toolbarSurfaceKey] || {}, estado = ent[v.toolbarStateKey] || {};
+      const curtido = estado.likeState === 'TOOLBAR_LIKE_STATE_LIKED';
+      return {
+        autor: e.author?.displayName || '', canal: e.author?.channelId || '', foto: e.author?.avatarThumbnailUrl || '',
+        texto: e.properties?.content?.content || '', quando: e.properties?.publishedTime || '',
+        likes: (curtido ? e.toolbar?.likeCountLiked : e.toolbar?.likeCountNotliked) || '', respostas: e.toolbar?.replyCount || '',
+        curtido, curtir: acao(barra.likeCommand), descurtir: acao(barra.unlikeCommand),
+      };
+    });
+  }
+
+  // Botão de like do comentário: usa a mesma ação que o botão do YouTube (perform_comment_action)
+  function botaoLike(c) {
+    let curtido = c.curtido;
+    let n = /^\d+$/.test(c.likes) ? +c.likes : null;  // "1,2 mil" fica como está (não dá para somar)
+    const b = el('button', { class: 'ub2-like', title: 'Gostei' });
+    const mostrar = () => {
+      b.textContent = `👍 ${n !== null ? (n || '') : c.likes}`.trim();
+      b.classList.toggle('curtido', curtido);
+    };
+    mostrar();
+    b.addEventListener('click', async () => {
+      const acao = curtido ? c.descurtir : c.curtir;
+      if (!acao || b.disabled) return;
+      b.disabled = true;
+      try {
+        await api('comment/perform_comment_action', { actions: [acao] });
+        curtido = !curtido;
+        if (n !== null) n += curtido ? 1 : -1;
+        mostrar();
+      } catch (e) {
+        log('like no comentário falhou:', e.message);
+      }
+      b.disabled = false;
+    });
+    return b;
   }
 
   function caixaComentarios(tokenInicial) {
@@ -1226,9 +1282,8 @@
               el('div', {}, el('a', { class: 'ub2-autor', href: c.canal ? `/channel/${c.canal}` : `/${c.autor}` }, c.autor),
                 el('span', { class: 'ub2-quando' }, c.quando)),
               el('div', { class: 'ub2-texto' }, textoComLinks(c.texto)),
-              el('div', { class: 'ub2-rodape' },
-                [c.likes && c.likes !== '0' ? `👍 ${c.likes}` : '', c.respostas ? `${c.respostas} resposta${c.respostas === '1' ? '' : 's'}` : '']
-                  .filter(Boolean).join(' · ')))));
+              el('div', { class: 'ub2-rodape' }, botaoLike(c),
+                c.respostas ? `${c.respostas} resposta${c.respostas === '1' ? '' : 's'}` : ''))));
         }
         token = achar(j, 'continuationItemRenderer').map(c => achar(c, 'token')[0]).filter(Boolean).pop();
       } catch (e) {
@@ -1258,6 +1313,59 @@
         el('div', { class: 'ub2-nome', title: item.titulo }, item.titulo),
         el('div', { class: 'ub2-info' }, item.canal || '', el('br'), item.meta || '')));
   }
+
+  // No layout novo do YouTube, o botão de "modo teatro" do player abre/fecha o painel de comentários e encolhe o
+  // vídeo. Aqui ele (e a tecla T) alterna os nossos dois modos: padrão (sugestões à direita do vídeo) e teatro
+  // (vídeo na largura toda; sugestões à direita da descrição, embaixo). A escolha fica guardada.
+  function aplicarModo() {
+    const teatro = GM_getValue('teatro', false);
+    document.documentElement.toggleAttribute('ub-teatro', teatro);
+    alinharLateral();
+    for (const ms of [0, 300, 1000]) setTimeout(() => window.dispatchEvent(new Event('resize')), ms);
+    const botao = document.querySelector('.ytp-size-button');
+    if (botao) botao.setAttribute('aria-label', teatro ? 'Visualização padrão (t)' : 'Modo teatro (t)');
+  }
+
+  // No teatro, as sugestões começam na altura da descrição: a coluna da direita desce o tanto que o título ocupa
+  // (acompanha quando o título muda de tamanho, ex.: vídeo novo ou janela redimensionada)
+  let olhoTitulo = null;
+  function alinharLateral() {
+    const lateral = document.querySelector('ytd-watch-flexy #secondary');
+    const sobre = document.getElementById('ub-sobre');
+    const below = document.querySelector('ytd-watch-flexy #below');
+    if (!lateral) return;
+    if (!document.documentElement.hasAttribute('ub-teatro') || !sobre || !below) {
+      lateral.style.removeProperty('margin-top');
+      return;
+    }
+    const desce = Math.max(0, sobre.getBoundingClientRect().top - below.getBoundingClientRect().top);
+    lateral.style.setProperty('margin-top', `${Math.round(desce)}px`, 'important');
+    if (!olhoTitulo) {
+      olhoTitulo = new ResizeObserver(() => alinharLateral());
+      const meta = document.querySelector('ytd-watch-flexy ytd-watch-metadata');
+      if (meta) olhoTitulo.observe(meta);
+    }
+  }
+
+  function alternarModo() {
+    GM_setValue('teatro', !GM_getValue('teatro', false));
+    aplicarModo();
+  }
+
+  window.addEventListener('click', e => {
+    if (!document.documentElement.hasAttribute('ub-assistir') || !e.target.closest?.('.ytp-size-button')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    alternarModo();
+  }, true);
+  window.addEventListener('keydown', e => {
+    if (!document.documentElement.hasAttribute('ub-assistir') || e.key.toLowerCase() !== 't' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const alvo = e.composedPath()[0] || e.target;
+    if (alvo.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName || '')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    alternarModo();
+  }, true);
 
   let assistindo = null;
   async function montarAssistir() {
@@ -1303,7 +1411,7 @@
         .map(s => achar(s, 'token')[0]).filter(Boolean)[0];
       meta.after(caixaSobre(info), caixaComentarios(tok));
       document.documentElement.setAttribute('ub-assistir', '');
-      window.dispatchEvent(new Event('resize'));  // o YouTube recalcula o tamanho do vídeo para a coluna nova
+      aplicarModo();
       // Fim do vídeo: o próximo do mesmo grupo (só quando veio de uma fileira)
       const video = document.querySelector('ytd-watch-flexy video');
       if (doGrupo && video) {
