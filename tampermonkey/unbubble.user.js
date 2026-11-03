@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.3
+// @version      0.11.4
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1115,10 +1115,14 @@
     html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; pointer-events: auto !important; }
     /* Modo teatro: vídeo na largura toda; embaixo, título/descrição/comentários à esquerda e sugestões à direita */
     html[ub-assistir][ub-teatro] ytd-watch-flexy #columns { display: grid !important; grid-template-columns: minmax(0, 1fr) 340px;
-      column-gap: 24px; width: min(100% - 48px, (100vh - 192px) * 16 / 9) !important; margin: 0 auto !important; padding: 0 !important; }
+      column-gap: 24px; width: calc(100% - 48px) !important; margin: 0 auto !important; padding: 0 !important; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #primary, html[ub-assistir][ub-teatro] ytd-watch-flexy #primary-inner { display: contents !important; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #player { grid-column: 1 / -1; grid-row: 1; width: 100%; max-width: none; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #below { grid-column: 1; grid-row: 2; min-width: 0; }
+    html[ub-assistir] ytd-watch-flexy #below > div { width: auto !important; max-width: none !important; min-width: 0 !important;
+      margin-left: 0 !important; margin-right: 0 !important; }
+    /* a linha do título (com views e botões) vai até a borda direita do vídeo; as sugestões começam abaixo dela */
+    html[ub-assistir][ub-teatro] ytd-watch-flexy ytd-watch-metadata { width: calc(100% + 364px) !important; max-width: none !important; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #secondary { grid-column: 2; grid-row: 2; width: auto !important; margin: 0 !important; }
     html[ub-assistir] ytd-watch-flexy #related, html[ub-assistir] ytd-watch-flexy #secondary #panels,
     html[ub-assistir] ytd-watch-flexy ytd-comments#comments, html[ub-assistir] ytd-watch-metadata #description,
@@ -1481,6 +1485,7 @@
     document.documentElement.toggleAttribute('ub-teatro', teatro);
     alinharLateral();
     for (const ms of [0, 300, 1000]) setTimeout(() => window.dispatchEvent(new Event('resize')), ms);
+    ajustarLarguraTeatro();
     const botao = document.querySelector('.ytp-size-button');
     if (botao) botao.setAttribute('aria-label', teatro ? 'Visualização padrão (t)' : 'Modo teatro (t)');
   }
@@ -1505,6 +1510,31 @@
       if (meta) olhoTitulo.observe(meta);
     }
   }
+
+  // No teatro, o YouTube escolhe o maior vídeo que cabe na tela; depois disso as colunas de baixo (título, descrição,
+  // comentários e sugestões) ficam com a largura exata do vídeo, alinhadas às bordas dele. Refaz quando a janela muda.
+  let medida = null;
+  function ajustarLarguraTeatro() {
+    const cols = document.querySelector('ytd-watch-flexy #columns');
+    if (!cols) return;
+    cols.style.removeProperty('width');
+    clearTimeout(medida);
+    if (!document.documentElement.hasAttribute('ub-teatro')) return;
+    medida = setTimeout(() => {
+      const w = document.querySelector('ytd-watch-flexy .html5-video-player')?.getBoundingClientRect().width;
+      if (w && w < cols.getBoundingClientRect().width - 2) cols.style.setProperty('width', `${Math.round(w)}px`, 'important');
+      alinharLateral();
+    }, 700);
+  }
+  let esperaJanela = null;
+  window.addEventListener('resize', e => {
+    if (!e.isTrusted || !document.documentElement.hasAttribute('ub-teatro')) return;  // só quando a janela muda de verdade
+    clearTimeout(esperaJanela);
+    esperaJanela = setTimeout(() => {
+      ajustarLarguraTeatro();
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+    }, 250);
+  });
 
   function alternarModo() {
     GM_setValue('teatro', !GM_getValue('teatro', false));
