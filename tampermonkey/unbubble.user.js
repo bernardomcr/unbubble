@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.12
+// @version      0.13
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1115,6 +1115,7 @@
       itens: g.itens.slice(0, 150).map(i => ({
         id: i.id, titulo: i.titulo || '', canal: i.canal || '', canal_id: i.canal_id || '', duracao: i.duracao || '',
         meta: i.meta || (i.views != null ? `${views(i.views)} · ${quando(i.publicado)}` : ''), motivo: i.motivo || '',
+        ...(i.irmaos ? { irmaos: i.irmaos.slice(0, 6) } : {}),
       })),
     });
   }
@@ -1592,6 +1593,46 @@
   }, true);
 
   let assistindo = null;
+  // "Pelo caminho do YouTube": as sugestões do YouTube para este vídeo (as da página, logado, que acertam o tema,
+  // mais as de visitante anônimo; testado: a anônima sozinha é instável, muitas vezes só notícia do dia), filtradas
+  // sem IA para ficar fora da bolha: tira canal que ele já conhece (todo canal já classificado em temas.json vem do
+  // histórico ou dos recomendados dele), recusados, música, e deixa no máximo 1 de notícia/política. O YouTube
+  // mistura o que está em alta no país (notícia, futebol, política de horas atrás): vídeo de menos de 1 semana fica
+  // de fora (o lixo era todo de "há X h/dias"; o que está no tema é quase sempre antigo). Os do assunto vêm primeiro.
+  const CAMINHO_MAX = 10;
+  const CAMINHO_FORA = new Set(['politica', 'religiao', 'lixo_algoritmo', 'jogos', 'ia_tecnologia', 'infantil', 'podcast_entrevista']);
+  const NOTICIA_RE = /\b(bolsonar\w*|lula|pt|stf|trump|putin|guerra|governo|eleiç\w+|polític\w*|notícia\w*|urgente|ao vivo|jornal|news|breaking|cnn|globonews|senado|câmara|ministro|presidente|democrat\w*|republican\w*)\b/i;
+  const MUSICA_TIT_RE = /\b(official (music )?video|clipe|lyrics?|letra|cover|remix|ao vivo|live session|full album|álbum|feat\.|ft\.)\b/i;
+
+  const RECENTE_RE = /\bhá \d+ (s|seg\w*|min\w*|h|horas?|dias?)\b|assistindo|\b\d+ (seconds?|minutes?|hours?|days?) ago\b|watching/i;
+  const PALAVRAS_COMUNS = new Set(('como para pelo pela mais muito quem final tudo isso esse essa este esta when what with from ' +
+    'that this your have they will about video vídeo world mundo full parte part over best melhor').split(' '));
+  const palavrasDe = t => new Set(((t || '').toLowerCase().match(/[^\s\d\p{P}\p{S}]{4,}/gu) || []).filter(p => !PALAVRAS_COMUNS.has(p)));
+
+  async function caminhoDoYouTube(id, excluir, titulosAssunto, prox) {
+    try {
+      temasMapa ??= await lerTemas();
+      const fora = new Set(excluir);
+      const ref = new Set(titulosAssunto.flatMap(t => [...palavrasDe(t)]));
+      const doAssunto = v => [...palavrasDe(v.titulo)].some(p => ref.has(p));
+      const anonimas = await apiAnonima('next', { videoId: id }).then(videosDoFeed).catch(() => []);
+      const conhecido = c => !!c && (CAMINHO_FORA.has(temasMapa?.canais?.[c]) || (temasMapa?.canais && c in temasMapa.canais));
+      let noticias = 0;
+      const out = [];
+      for (const v of [...videosDoFeed(achar(prox, 'secondaryResults')[0] || prox), ...anonimas]) {
+        if (fora.has(v.id) || bloqueado(v) || conhecido(v.canal) || MUSICA_TIT_RE.test(v.titulo)) continue;
+        if (RECENTE_RE.test(v.meta)) continue;
+        if (NOTICIA_RE.test(v.titulo) && noticias++ >= 1) continue;
+        fora.add(v.id);
+        out.push(v);
+      }
+      return [...out.filter(doAssunto), ...out.filter(v => !doAssunto(v))].slice(0, CAMINHO_MAX);
+    } catch (e) {
+      log('caminho do YouTube falhou:', e.message);
+      return [];
+    }
+  }
+
   async function montarAssistir() {
     const id = new URLSearchParams(location.search).get('v');
     if (location.pathname !== '/watch' || !id) {
@@ -1615,21 +1656,35 @@
       if (assistindo !== id) return;
       for (const velho of document.querySelectorAll('#ub-sobre, #ub-coments, #ub-lateral')) velho.remove();
       instalarCssAssistir();
-      // Grupo: só se este vídeo veio de uma das fileiras (está na lista guardada no clique); senão, relacionados do YouTube
+      // Grupo: só se este vídeo veio de uma das fileiras (está na lista guardada no clique, ou é um "Mais disso" de
+      // um vídeo dela); senão, relacionados do YouTube
       const ctx = GM_getValue('contexto', null);
-      const doGrupo = ctx && ctx.itens?.some(i => i.id === id);
-      let itens, cab, fileiraCtx;
+      const dono = ctx?.itens?.find(i => i.id === id || i.irmaos?.some(x => x.id === id));
+      const doGrupo = !!dono;
+      // "Mais disso": o vídeo da fileira e os outros do mesmo assunto que ficaram fora dela (só no Aleatório)
+      const assunto = dono?.irmaos ? [dono, ...dono.irmaos].filter(i => !bloqueado(i)) : [];
+      const maisDisso = assunto.filter(i => i.id !== id);
+      let itens, cab, fileiraCtx, caminho = [];
       if (doGrupo) {
-        itens = ctx.itens.filter(i => i.id !== id && !bloqueado(i));
+        itens = ctx.itens.filter(i => i.id !== id && i.id !== dono.id && !bloqueado(i));
         cab = ['Mais de ', el('span', {}, `“${ctx.titulo}”`)];
         fileiraCtx = ctx.fileira;
+        if (ctx.fileira.startsWith('fura_')) {
+          const titulos = [dono, ...(dono.irmaos || [])].map(i => i.titulo);
+          caminho = await caminhoDoYouTube(id, [id, ...assunto.map(i => i.id)], titulos, prox);
+        }
       } else {
         itens = videosDoFeed(achar(prox, 'secondaryResults')[0] || prox).filter(i => i.id !== id && !bloqueado(i));
         cab = ['Relacionados ', el('span', {}, '(sugestões do YouTube)')];
         fileiraCtx = 'yt_relacionados';
       }
-      const caixaLateral = el('div', { id: 'ub-lateral' }, el('div', { class: 'ub2-titulo' }, ...cab),
-        ...itens.slice(0, 40).map(i => sugestaoPequena(i, fileiraCtx)));
+      if (assistindo !== id) return;
+      const secao = (titulo, lista, fil) => lista.length
+        ? [el('div', { class: 'ub2-titulo' }, ...titulo), ...lista.map(i => sugestaoPequena(i, fil))] : [];
+      const caixaLateral = el('div', { id: 'ub-lateral' },
+        ...secao(['Mais disso'], maisDisso, fileiraCtx),
+        ...secao(['Pelo caminho do YouTube ', el('span', {}, '(fora da sua bolha)')], caminho, 'yt_caminho'),
+        ...secao(cab, itens.slice(0, 40), fileiraCtx));
       lateral.prepend(caixaLateral);
       const tok = achar(prox, 'itemSectionRenderer').filter(s => s.sectionIdentifier === 'comment-item-section')
         .map(s => achar(s, 'token')[0]).filter(Boolean)[0];
@@ -1639,15 +1694,17 @@
       // Fim do vídeo: o próximo do mesmo grupo (só quando veio de uma fileira)
       const video = document.querySelector('ytd-watch-flexy video');
       if (doGrupo && video) {
+        // primeiro o resto do mesmo assunto ("Mais disso"), depois o vídeo seguinte da fileira
         const lista = ctx.itens.filter(i => !bloqueado(i));
-        const proximo = lista[lista.findIndex(i => i.id === id) + 1];
+        const proximo = assunto[assunto.findIndex(i => i.id === id) + 1] || lista[lista.findIndex(i => i.id === dono.id) + 1];
         if (proximo) {
           video.addEventListener('ended', () => {
             if (assistindo === id) location.href = `/watch?v=${proximo.id}`;
           }, { once: true });
         }
       }
-      log(`página do vídeo: ${itens.length} sugestões (${doGrupo ? 'grupo ' + ctx.titulo : 'YouTube'}), comentários ${tok ? 'sim' : 'não'}`);
+      log(`página do vídeo: ${maisDisso.length} mais disso, ${caminho.length} pelo caminho do YouTube, ${itens.length} sugestões ` +
+          `(${doGrupo ? 'grupo ' + ctx.titulo : 'YouTube'}), comentários ${tok ? 'sim' : 'não'}`);
     } catch (e) {
       log('página do vídeo ficou como a original:', e.message);
       document.documentElement.removeAttribute('ub-assistir');
