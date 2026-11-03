@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.4
+// @version      0.11.5
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1121,6 +1121,9 @@
     html[ub-assistir][ub-teatro] ytd-watch-flexy #below { grid-column: 1; grid-row: 2; min-width: 0; }
     html[ub-assistir] ytd-watch-flexy #below > div { width: auto !important; max-width: none !important; min-width: 0 !important;
       margin-left: 0 !important; margin-right: 0 !important; }
+    /* teatro clássico: o vídeo ocupa toda a altura abaixo da barra do YouTube (o YouTube limita a janela − 192 px) */
+    html[ub-assistir][ub-teatro] ytd-watch-flexy { --ytd-watch-flexy-max-player-height: calc(100vh - 56px) !important;
+      --ytd-watch-flexy-max-player-width: calc((100vh - 56px) * 16 / 9) !important; }
     /* a linha do título (com views e botões) vai até a borda direita do vídeo; as sugestões começam abaixo dela */
     html[ub-assistir][ub-teatro] ytd-watch-flexy ytd-watch-metadata { width: calc(100% + 364px) !important; max-width: none !important; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #secondary { grid-column: 2; grid-row: 2; width: auto !important; margin: 0 !important; }
