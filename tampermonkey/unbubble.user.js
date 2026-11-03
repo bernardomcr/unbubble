@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.6.1
+// @version      0.6.2
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -358,14 +358,23 @@
     #unbubble button.ub-mais { background: transparent; }
   `;
 
-  const SVG_SETA = '<svg viewBox="0 0 24 24"><path d="M9.4 18.4l-.7-.7 5.6-5.6-5.7-5.7.7-.7 6.4 6.4-6.3 6.3z"/></svg>';
-  const SVG_MAIS = '<svg viewBox="0 0 24 24"><path d="M12 16.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zM10.5 12c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5zm0-6c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5z"/></svg>';
+  // Ícones montados peça por peça: o YouTube proíbe innerHTML (Trusted Types) e o script inteiro falhava.
+  const SVG_SETA = 'M9.4 18.4l-.7-.7 5.6-5.6-5.7-5.7.7-.7 6.4 6.4-6.3 6.3z';
+  const SVG_MAIS = '"M12 16.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zM10.5 12c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5zm0-6c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5z';
+  function icone(d) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+    return svg;
+  }
 
   function el(tag, attrs = {}, ...filhos) {
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (k === 'class') e.className = v;
-      else if (k === 'html') e.innerHTML = v;  // só para os ícones fixos acima
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v);
     }
@@ -401,7 +410,7 @@
     else if (item.selo) capa.append(el('span', { class: 'ub-selo', title: 'Combina com os seus interesses' }, item.selo));
     const meta = item.meta || (item.views != null ? `${views(item.views)} · ${quando(item.publicado)}` : '');
     const c = el('div', { class: 'ub-card' });
-    const mais = el('button', { class: 'ub-mais', title: 'Mais opções', 'aria-label': 'Mais opções', html: SVG_MAIS });
+    const mais = el('button', { class: 'ub-mais', title: 'Mais opções', 'aria-label': 'Mais opções' }, icone(SVG_MAIS));
     mais.addEventListener('click', e => {
       e.preventDefault(); e.stopPropagation();
       const jaAberto = menuAberto?.botao === mais;
@@ -455,8 +464,8 @@
   // null = acabou; lista vazia = essa página não passou nos filtros, tenta a próxima.
   function fileira(id, titulo, itens, carregarMais) {
     const trilho = el('div', { class: 'ub-trilho' });
-    const esq = el('button', { class: 'ub-seta esq', 'aria-label': 'Anterior', html: SVG_SETA });
-    const dir = el('button', { class: 'ub-seta dir', 'aria-label': 'Próximo', html: SVG_SETA });
+    const esq = el('button', { class: 'ub-seta esq', 'aria-label': 'Anterior' }, icone(SVG_SETA));
+    const dir = el('button', { class: 'ub-seta dir', 'aria-label': 'Próximo' }, icone(SVG_SETA));
     const sec = el('section', { class: 'ub-fileira', 'data-fileira': id },
       el('div', { class: 'ub-cab' }, el('span', { class: 'ub-bolha', title: 'fileira do unbubble' }), el('h2', { class: 'ub-titulo' }, titulo)),
       el('div', { class: 'ub-linha' }, esq, trilho, dir));
@@ -769,10 +778,18 @@
 
   // Vigia: o YouTube às vezes recria a grade da home depois de carregar (e leva as fileiras junto), ou
   // traz uma grade nova visível. Se as fileiras sumiram, monta de novo; se a grade voltou, esconde.
+  let remontagens = 0;
+  window.addEventListener('yt-navigate-finish', () => { remontagens = 0; });
   function vigiar() {
     if (location.pathname !== '/' || rodando || !GM_getValue('token', '')) return;
     const caixa = document.getElementById('unbubble');
-    if (!caixa) { log('fileiras sumiram da página, montando de novo'); montar(); return; }
+    if (!caixa) {
+      if (remontagens >= 3) return;  // algo quebrado: desiste e deixa a home original (sem ficar insistindo)
+      remontagens++;
+      log('fileiras sumiram da página, montando de novo');
+      montar();
+      return;
+    }
     const a = alvo();
     if (a && a.style.display !== 'none' && caixa.querySelector('.ub-fileira')) {
       a.style.display = 'none';
