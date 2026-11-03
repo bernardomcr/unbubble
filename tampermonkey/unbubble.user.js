@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.5.0
+// @version      0.6.0
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -451,7 +451,8 @@
   }
 
   // Uma fileira: título com a bolhinha, trilho sem barra de rolagem e setas no estilo do YouTube.
-  // carregarMais (opcional) é chamado perto do fim do trilho e devolve mais itens: rolagem infinita.
+  // carregarMais (opcional) é chamado perto do fim do trilho e devolve mais itens (rolagem infinita);
+  // null = acabou; lista vazia = essa página não passou nos filtros, tenta a próxima.
   function fileira(id, titulo, itens, carregarMais) {
     const trilho = el('div', { class: 'ub-trilho' });
     const esq = el('button', { class: 'ub-seta esq', 'aria-label': 'Anterior', html: SVG_SETA });
@@ -468,7 +469,7 @@
       }
     };
     por(itens);
-    let carregando = false, acabou = !carregarMais;
+    let carregando = false, acabou = !carregarMais, vazias = 0;
     const atualizar = () => {
       const fimVisivel = trilho.scrollLeft + trilho.clientWidth;
       esq.classList.toggle('ativa', trilho.scrollLeft > 4);
@@ -476,7 +477,10 @@
       if (!acabou && !carregando && fimVisivel > trilho.scrollWidth - 3 * 276) {
         carregando = true;
         carregarMais().then(novos => {
-          if (!novos || !novos.length) acabou = true; else por(novos);
+          const antes = trilho.children.length;
+          if (novos === null) acabou = true; else por(novos);
+          vazias = trilho.children.length > antes ? 0 : vazias + 1;
+          if (vazias >= 5) acabou = true;  // 5 páginas seguidas sem nada aproveitável: para
         }).catch(e => { acabou = true; log('fileira', id, 'parou:', e.message); })
           .finally(() => { carregando = false; atualizar(); });
       }
@@ -499,7 +503,10 @@
   function desenharFileiras(caixa, home) {
     const ui = (f) => { if (f.itens?.length) { const s = fileira(f.id, f.titulo, f.itens); if (!s._vazia()) caixa.append(s); } };
     const fs = home.fileiras || [];
-    for (const f of fs.filter(f => !f.id.startsWith('cat_'))) ui(f);
+    const nossas = fs.filter(f => !f.id.startsWith('cat_'));
+    for (const f of nossas.slice(0, 1)) ui(f);
+    caixa.append(el('div', { id: 'ub-rec-yt' }));    // Recomendados pelo YouTube (com teto) logo depois de Dos seus canais
+    for (const f of nossas.slice(1)) ui(f);
     caixa.append(el('div', { id: 'ub-temas-yt' }));  // fileiras dos temas do próprio YouTube entram aqui
     for (const f of fs.filter(f => f.id.startsWith('cat_'))) ui(f);
   }
@@ -527,8 +534,27 @@
     return out.filter(v => /^[\w-]{11}$/.test(v.id || ''));
   }
 
-  async function desenharTemasDoYouTube(lugar) {
+  // A home do YouTube inteira vira fileiras: os recomendados dele numa fileira só (infinita para o lado, com
+  // teto por tema) e cada tema (chip) numa fileira própria. A grade infinita para baixo some.
+  async function desenharYouTube(lugarRec, lugarTemas) {
     const j = await browse({ browseId: 'FEwhat_to_watch' });
+    if (lugarRec) {
+      const mantidos = [];
+      const comTeto = lista => { const ok = lista.filter(v => decidir(v, mantidos)); enviarSemTemaSeHora(); return ok; };
+      let r = j, prox = proximo(j);
+      const s = fileira('yt_recomendados', 'Recomendados pelo YouTube', comTeto(videosDoFeed(j)), async () => {
+        if (!prox) return null;
+        await pausa();
+        r = await browse({ continuation: prox });
+        prox = proximo(r);
+        return comTeto(videosDoFeed(r));
+      });
+      if (!s._vazia()) lugarRec.append(s);
+    }
+    if (lugarTemas) await desenharTemas(j, lugarTemas);
+  }
+
+  async function desenharTemas(j, lugar) {
     const chips = [];
     for (const c of achar(j, 'chipCloudChipRenderer')) {
       const tok = achar(c.navigationEndpoint, 'token')[0];
@@ -546,7 +572,7 @@
         let r = await browse({ continuation: t.tok });
         let prox = proximo(r);
         const s = fileira(`yt_${t.nome}`, t.nome, videosDoFeed(r), async () => {
-          if (!prox) return [];
+          if (!prox) return null;
           await pausa();
           r = await browse({ continuation: prox });
           prox = proximo(r);
@@ -611,31 +637,33 @@
     return id ? { id, titulo, canal } : null;
   }
 
+  // Decide (uma vez por vídeo) se ele entra, olhando os últimos mostrados em `mantidos`.
+  function decidir(d, mantidos) {
+    if (bloqueado(d)) return false;
+    let dec = decisao.get(d.id);
+    if (!dec) {
+      const tv = temasMapa?.videos?.[d.id];
+      const tema = tv ? tv[0] : temasMapa?.canais?.[d.canal] || null;
+      if (!tv && temasMapa) semTema.set(d.id, { id: d.id, titulo: d.titulo, canal: d.canal });
+      const janela = mantidos.slice(-(JANELA - 1));
+      const doTema = tema ? janela.filter(m => m.tema === tema).length : 0;
+      const doCanal = d.canal ? janela.filter(m => m.canal === d.canal).length : 0;
+      const teto = tema in TETOS ? TETOS[tema] : Infinity;
+      dec = { mostrar: doTema < teto && doCanal < POR_CANAL_JANELA, tema, canal: d.canal };
+      decisao.set(d.id, dec);
+    }
+    if (dec.mostrar) mantidos.push(dec);
+    return dec.mostrar;
+  }
+
+  // Só quando as fileiras não puderam substituir a grade: o teto vale na grade original do YouTube.
   function aplicarTetos(contents) {
     if (!temasMapa) return;
-    const mantidos = [];  // { tema, canal } dos últimos mostrados, em ordem
-    let escondidos = 0;
+    const mantidos = [];
     for (const it of contents.querySelectorAll(':scope > ytd-rich-item-renderer')) {
       const d = dadosDoItem(it);
-      if (!d) continue;
-      if (bloqueado(d)) { it.style.display = 'none'; continue; }
-      let dec = decisao.get(d.id);
-      if (!dec) {
-        const tv = temasMapa.videos?.[d.id];
-        const tema = tv ? tv[0] : temasMapa.canais?.[d.canal] || null;
-        if (!tv) semTema.set(d.id, d);
-        const janela = mantidos.slice(-(JANELA - 1));
-        const doTema = tema ? janela.filter(m => m.tema === tema).length : 0;
-        const doCanal = d.canal ? janela.filter(m => m.canal === d.canal).length : 0;
-        const teto = tema in TETOS ? TETOS[tema] : Infinity;
-        dec = { mostrar: doTema < teto && doCanal < POR_CANAL_JANELA, tema, canal: d.canal };
-        decisao.set(d.id, dec);
-      }
-      it.style.display = dec.mostrar ? '' : 'none';
-      if (dec.mostrar) mantidos.push(dec); else escondidos++;
+      if (d) it.style.display = decidir(d, mantidos) ? '' : 'none';
     }
-    const nota = document.getElementById('ub-teto');
-    if (nota) nota.textContent = escondidos ? `${escondidos} recomendados escondidos pelo teto de temas` : '';
     enviarSemTemaSeHora();
   }
 
@@ -658,9 +686,7 @@
 
   let observador = null;
   async function iniciarTeto(contents) {
-    temasMapa = await lerTemas();
     if (!temasMapa) return;  // sem temas: home do YouTube fica como está
-    decisao.clear();
     aplicarTetos(contents);
     observador?.disconnect();
     let espera = null;
@@ -697,10 +723,12 @@
       if (!GM_getValue('token', '')) {
         desenharConvite(caixa);
       } else {
-        const home = await lerHome();
+        const [home, temas] = await Promise.all([lerHome(), lerTemas()]);
+        temasMapa = temas;
+        decisao.clear();
         carregarBloqueios(home);
-        if (home) desenharFileiras(caixa, home);  // falhou e sem cache: sem fileiras, mas o teto ainda vale
-        else caixa.append(el('div', { id: 'ub-temas-yt' }));
+        if (home) desenharFileiras(caixa, home);  // falhou e sem cache: só as fileiras do YouTube
+        else caixa.append(el('div', { id: 'ub-rec-yt' }), el('div', { id: 'ub-temas-yt' }));
       }
       if (document.getElementById('unbubble')) return;
       // mesma largura e recuo da grade de vídeos do YouTube
@@ -708,9 +736,21 @@
       caixa.style.marginLeft = `${Math.max(g.left - pai.left, 0)}px`;
       caixa.style.marginRight = `${Math.max(pai.right - g.right, 0)}px`;
       contents.before(caixa);
-      if (GM_getValue('token', '')) iniciarTeto(contents).catch(e => log('erro no teto:', e));
-      const lugar = document.getElementById('ub-temas-yt');
-      if (lugar) desenharTemasDoYouTube(lugar).catch(e => log('temas do YouTube falharam:', e.message));
+      if (!GM_getValue('token', '')) return;
+      // Substitui a grade infinita do YouTube pelas fileiras, mas só se houver fileira de verdade
+      // (nunca página em branco). Escondida, a grade também para de carregar mais vídeos.
+      const substituir = () => {
+        if (!caixa.querySelector('.ub-fileira') || contents.style.display === 'none') return false;
+        contents.style.display = 'none';
+        const cab = contents.parentElement.querySelector(':scope > #header');  // chips: viraram fileiras
+        if (cab) cab.style.display = 'none';
+        observador?.disconnect();
+        return true;
+      };
+      if (!substituir()) iniciarTeto(contents).catch(e => log('erro no teto:', e));
+      desenharYouTube(document.getElementById('ub-rec-yt'), document.getElementById('ub-temas-yt'))
+        .catch(e => log('fileiras do YouTube falharam:', e.message))
+        .finally(substituir);
     } catch (e) {
       log('erro, home original mantida:', e);
     } finally {
