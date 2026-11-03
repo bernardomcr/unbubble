@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.9.1
+// @version      0.9.2
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -376,10 +376,11 @@
     #unbubble .ub-bolha { width: 12px; height: 12px; border: 2px dashed ${COR}; border-radius: 50%; flex: none; }
     #unbubble .ub-fileira { margin: 0 0 40px; }
     #unbubble.ub-modo-palco { display: flex; flex-direction: column; justify-content: center;
-      min-height: calc(100vh - 56px - 48px); margin-top: 0; margin-bottom: 0; }
+      min-height: calc(100vh - 56px - 48px); margin-top: 0; margin-bottom: 0;
+      padding-top: 56px; box-sizing: border-box; }  /* a faixa desfocada do topo (onde ficavam os chips) cobre 56 px */
     #unbubble .ub-palco { min-height: 290px; }
     #unbubble .ub-palco .ub-fileira { margin: 0; }
-    #unbubble .ub-palco .ub-cab { display: none; }
+    #unbubble .ub-palco .ub-cab { margin: 0 0 16px; }
     #unbubble .ub-carregando { height: 250px; display: flex; align-items: center; justify-content: center;
       font-size: 1.4rem; color: var(--ub-texto2); }
     #unbubble .ub-botoes { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 10px; margin: 32px 0 0; }
@@ -405,7 +406,8 @@
     #unbubble .ub-seta.dir { right: 28px; }
     #unbubble .ub-seta.esq { left: 28px; }
     #unbubble .ub-seta.esq svg { transform: scaleX(-1); }
-    #unbubble .ub-seta.dir.ativa, #unbubble .ub-linha:hover .ub-seta.esq.ativa { opacity: 1; pointer-events: auto; }
+    /* as duas setas: só com o mouse em cima da fileira, e só se der para rolar para aquele lado */
+    #unbubble .ub-linha:hover .ub-seta.ativa { opacity: 1; pointer-events: auto; }
     #unbubble .ub-card { scroll-snap-align: start; min-width: 0; position: relative; }
     #unbubble .ub-card a { text-decoration: none; color: inherit; }
     #unbubble .ub-capa { display: block; position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
@@ -553,7 +555,9 @@
     const esq = el('button', { class: 'ub-seta esq', 'aria-label': 'Anterior' }, icone(SVG_SETA));
     const dir = el('button', { class: 'ub-seta dir', 'aria-label': 'Próximo' }, icone(SVG_SETA));
     const sec = el('section', { class: 'ub-fileira', 'data-fileira': id },
-      el('div', { class: 'ub-cab' }, el('span', { class: 'ub-bolha', title: 'fileira do unbubble' }), el('h2', { class: 'ub-titulo' }, titulo)),
+      el('div', { class: 'ub-cab' },  // bolhinha só nas fileiras nossas; as do YouTube ficam só com o título
+        ...(id.startsWith('yt_') ? [] : [el('span', { class: 'ub-bolha', title: 'fileira do unbubble' })]),
+        el('h2', { class: 'ub-titulo' }, titulo)),
       el('div', { class: 'ub-linha' }, esq, trilho, dir));
     const ids = new Set();
     const por = (lista) => {
