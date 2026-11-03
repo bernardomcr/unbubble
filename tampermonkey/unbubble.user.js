@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.8.0
+// @version      0.9.0
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -362,15 +362,32 @@
   const CSS = `
     #unbubble { --ub-texto: #0f0f0f; --ub-texto2: #606060; --ub-fundo-capa: #e5e5e5;
       --ub-botao: #ffffff; --ub-menu: #ffffff; --ub-hover: rgba(0,0,0,.08);
+      --ub-chip: rgba(0,0,0,.05); --ub-chip-hover: rgba(0,0,0,.1); --ub-fundo: #ffffff;
       align-self: stretch; min-width: 0; box-sizing: border-box; margin: 16px 0 24px;
       font-family: Roboto, Arial, sans-serif; }
     html[dark] #unbubble { --ub-texto: #f1f1f1; --ub-texto2: #aaaaaa; --ub-fundo-capa: #272727;
-      --ub-botao: #212121; --ub-menu: #282828; --ub-hover: rgba(255,255,255,.1); }
+      --ub-botao: #212121; --ub-menu: #282828; --ub-hover: rgba(255,255,255,.1);
+      --ub-chip: rgba(255,255,255,.1); --ub-chip-hover: rgba(255,255,255,.2); --ub-fundo: #0f0f0f; }
     #unbubble .ub-cab { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; }
     #unbubble .ub-titulo { font-size: 2rem; line-height: 2.8rem; font-weight: 700; color: var(--ub-texto); margin: 0; }
     #unbubble .ub-marca { font-size: 1.2rem; font-weight: 700; color: ${COR}; letter-spacing: .02em; }
     #unbubble .ub-bolha { width: 12px; height: 12px; border: 2px dashed ${COR}; border-radius: 50%; flex: none; }
     #unbubble .ub-fileira { margin: 0 0 40px; }
+    #unbubble.ub-modo-palco { display: flex; flex-direction: column; justify-content: center;
+      min-height: calc(100vh - 56px - 48px); margin-top: 0; margin-bottom: 0; }
+    #unbubble .ub-palco { min-height: 290px; }
+    #unbubble .ub-palco .ub-fileira { margin: 0; }
+    #unbubble .ub-palco .ub-cab { display: none; }
+    #unbubble .ub-palco .ub-trilho { grid-auto-columns: 300px; }
+    #unbubble .ub-palco .ub-seta { top: 84px; }
+    #unbubble .ub-carregando { height: 250px; display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; color: var(--ub-texto2); }
+    #unbubble .ub-botoes { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 10px; margin: 32px 0 0; }
+    #unbubble button.ub-botao { background: var(--ub-chip); color: var(--ub-texto); border-radius: 8px;
+      height: 32px; padding: 0 12px; font-size: 1.4rem; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
+    #unbubble button.ub-botao:hover { background: var(--ub-chip-hover); }
+    #unbubble button.ub-botao.ativo { background: var(--ub-texto); color: var(--ub-fundo); }
+    #unbubble button.ub-botao .ub-bolha { width: 9px; height: 9px; }
     #unbubble .ub-linha { position: relative; }
     #unbubble .ub-trilho { display: grid; grid-auto-flow: column; grid-auto-columns: 260px;
       gap: 16px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
@@ -578,21 +595,69 @@
     return caixa;
   }
 
-  function desenharFileiras(caixa, home) {
-    const ui = (f) => { if (f.itens?.length) { const s = fileira(f.id, f.titulo, f.itens); if (!s._vazia()) caixa.append(s); } };
-    const fs = home.fileiras || [];
+  // ---------- Palco: uma fileira só no centro da tela, e os botões embaixo trocam o que ela mostra ----------
+  // Cada aba tem uma seção pronta (sec) ou uma função que a cria no 1º clique (criar), para não carregar à toa.
+  function palco(caixa) {
+    const centro = el('div', { class: 'ub-palco' });
+    const botoes = el('div', { class: 'ub-botoes', role: 'tablist' });
+    caixa.classList.add('ub-modo-palco');
+    caixa.append(centro, botoes);
+    const abas = new Map();
+    const salva = GM_getValue('aba', '');
+    let atual = null, escolhida = false;
+    const p = {
+      adicionar(id, nome, { sec = null, criar = null, nossa = false } = {}) {
+        if (abas.has(id) || (!sec && !criar) || (sec && sec._vazia())) return;
+        const b = el('button', { class: 'ub-botao' + (nossa ? ' nossa' : ''), role: 'tab',
+                                 onclick: () => { escolhida = true; GM_setValue('aba', id); p.mostrar(id); } },
+          ...(nossa ? [el('span', { class: 'ub-bolha' })] : []), nome);
+        botoes.append(b);
+        abas.set(id, { id, sec, criar, botao: b });
+        if (!escolhida && id === salva && atual !== salva) p.mostrar(id);  // a última aba que ele usou
+      },
+      iniciar() {
+        if (atual) return;
+        const primeira = abas.has(salva) ? salva : abas.keys().next().value;
+        if (primeira) p.mostrar(primeira);
+      },
+      async mostrar(id) {
+        const a = abas.get(id);
+        if (!a) return;
+        atual = id;
+        for (const x of abas.values()) x.botao.classList.toggle('ativo', x.id === id);
+        for (const s of centro.children) s.style.display = 'none';
+        if (!a.sec) {
+          const espera = el('div', { class: 'ub-carregando' }, 'Carregando…');
+          centro.append(espera);
+          try { a.sec = await a.criar(); } catch (e) { log(`aba ${id} falhou:`, e.message); }
+          espera.remove();
+          if (!a.sec || a.sec._vazia()) {  // veio vazia: some o botão e volta para a primeira
+            a.botao.remove();
+            abas.delete(id);
+            if (atual === id) p.mostrar(abas.keys().next().value);
+            return;
+          }
+        }
+        if (!a.sec.isConnected) centro.append(a.sec);
+        if (atual === id) a.sec.style.display = '';
+      },
+    };
+    return p;
+  }
+
+  function adicionarNossas(p, home) {
+    const fs = (home.fileiras || []).filter(f => f.itens?.length && !f.id.startsWith('cat_'));
+    const nossa = f => fileira(f.id, f.titulo, f.itens);
     // Primeiro as que olham para ele (Dos seus canais, Fora da sua bolha), depois os recomendados do YouTube,
     // depois o que o Brasil está vendo (Em Alta, Mais vistos)
     const doBrasil = f => f.id === 'em_alta' || f.id === 'mais_vistos';
-    for (const f of fs.filter(f => !doBrasil(f) && !f.id.startsWith('cat_'))) ui(f);
-    caixa.append(el('div', { id: 'ub-rec-yt' }));    // Recomendados pelo YouTube (com teto)
-    for (const f of fs.filter(doBrasil)) ui(f);
-    caixa.append(el('div', { id: 'ub-temas-yt' }));  // fileiras dos temas do próprio YouTube entram aqui
-    for (const f of fs.filter(f => f.id.startsWith('cat_'))) ui(f);
+    for (const f of fs.filter(f => !doBrasil(f))) p.adicionar(f.id, f.titulo, { sec: nossa(f), nossa: true });
+    adicionarRecomendados(p);
+    for (const f of fs.filter(doBrasil)) p.adicionar(f.id, f.titulo, { sec: nossa(f), nossa: true });
   }
 
   // ---------- Fileiras infinitas com os temas que o próprio YouTube sugere (chips do topo da home) ----------
-  const TEMAS_IGNORADOS = /^(tudo|all|novidades? para voc[eê]|novos? para voc[eê]|enviados recentemente|assistidos|recently uploaded|watched|new to you)$/i;
+  const TEMAS_IGNORADOS = /^(tudo|all|novidades? para voc[eê]|novos? para voc[eê]|enviados recentemente|assistidos|mixes|recently uploaded|watched|new to you)$/i;
   const texto = t => (typeof t === 'string' ? t : t?.simpleText ?? t?.content ?? t?.runs?.map(r => r.text).join('') ?? '');
 
   function videosDoFeed(j) {
@@ -618,27 +683,29 @@
     return out.filter(v => /^[\w-]{11}$/.test(v.id || ''));
   }
 
-  // A home do YouTube inteira vira fileiras: os recomendados dele numa fileira só (infinita para o lado, com
-  // teto por tema) e cada tema (chip) numa fileira própria. A grade infinita para baixo some.
-  async function desenharYouTube(lugarRec, lugarTemas) {
-    const j = await browse({ browseId: 'FEwhat_to_watch' });
-    if (lugarRec) {
+  // A home do YouTube vira abas: os recomendados dele numa fileira (infinita para o lado, com teto por tema)
+  // e cada tema (chip) numa aba própria, carregada só quando ele clica. A grade infinita para baixo some.
+  let feedYT = null;
+  const lerFeedYT = () => (feedYT ??= browse({ browseId: 'FEwhat_to_watch' }));
+
+  function adicionarRecomendados(p) {
+    p.adicionar('yt_recomendados', 'Recomendados pelo YouTube', { criar: async () => {
+      const j = await lerFeedYT();
       const mantidos = [];
       const comTeto = lista => { const ok = lista.filter(v => decidir(v, mantidos)); enviarSemTemaSeHora(); return ok; };
-      let r = j, prox = proximo(j);
-      const s = fileira('yt_recomendados', 'Recomendados pelo YouTube', comTeto(videosDoFeed(j)), async () => {
+      let prox = proximo(j);
+      return fileira('yt_recomendados', 'Recomendados pelo YouTube', comTeto(videosDoFeed(j)), async () => {
         if (!prox) return null;
         await pausa();
-        r = await browse({ continuation: prox });
+        const r = await browse({ continuation: prox });
         prox = proximo(r);
         return comTeto(videosDoFeed(r));
       });
-      if (!s._vazia()) lugarRec.append(s);
-    }
-    if (lugarTemas) await desenharTemas(j, lugarTemas);
+    } });
   }
 
-  async function desenharTemas(j, lugar) {
+  async function adicionarTemasDoYouTube(p) {
+    const j = await lerFeedYT();
     const chips = [];
     for (const c of achar(j, 'chipCloudChipRenderer')) {
       const tok = achar(c.navigationEndpoint, 'token')[0];
@@ -652,21 +719,17 @@
     const temas = chips.filter(c => c.nome && !TEMAS_IGNORADOS.test(c.nome.trim()) && !vistos.has(c.nome) && vistos.add(c.nome));
     log(`temas do YouTube: ${temas.map(c => c.nome).join(', ') || 'nenhum'}`);
     for (const t of temas) {
-      try {
-        let r = await browse({ continuation: t.tok });
+      p.adicionar(`yt_${t.nome}`, t.nome, { criar: async () => {
+        const r = await browse({ continuation: t.tok });
         let prox = proximo(r);
-        const s = fileira(`yt_${t.nome}`, t.nome, videosDoFeed(r), async () => {
+        return fileira(`yt_${t.nome}`, t.nome, videosDoFeed(r), async () => {
           if (!prox) return null;
           await pausa();
-          r = await browse({ continuation: prox });
-          prox = proximo(r);
-          return videosDoFeed(r);
+          const r2 = await browse({ continuation: prox });
+          prox = proximo(r2);
+          return videosDoFeed(r2);
         });
-        if (!s._vazia()) lugar.append(s);
-      } catch (e) {
-        log(`tema ${t.nome} falhou:`, e.message);
-      }
-      await pausa();
+      } });
     }
   }
 
@@ -861,8 +924,10 @@
         temasMapa = temas;
         decisao.clear();
         carregarBloqueios(home);
-        if (home) desenharFileiras(caixa, home);  // falhou e sem cache: só as fileiras do YouTube
-        else caixa.append(el('div', { id: 'ub-rec-yt' }), el('div', { id: 'ub-temas-yt' }));
+        caixa._palco = palco(caixa);
+        if (home) adicionarNossas(caixa._palco, home);  // falhou e sem cache: só as abas do YouTube
+        else adicionarRecomendados(caixa._palco);
+        caixa._palco.iniciar();
       }
       if (document.getElementById('unbubble')) return;
       // mesma largura e recuo da grade de vídeos do YouTube
@@ -884,9 +949,9 @@
         return true;
       };
       if (!substituir()) iniciarTeto(contents).catch(e => log('erro no teto:', e));
-      desenharYouTube(document.getElementById('ub-rec-yt'), document.getElementById('ub-temas-yt'))
-        .catch(e => log('fileiras do YouTube falharam:', e.message))
-        .finally(substituir);
+      adicionarTemasDoYouTube(caixa._palco)
+        .catch(e => log('temas do YouTube falharam:', e.message))
+        .finally(() => setTimeout(substituir, 1500));  // dá tempo da aba inicial (que pode carregar do YouTube) aparecer
     } catch (e) {
       errosMontar++;
       log('erro, home original mantida:', e);
