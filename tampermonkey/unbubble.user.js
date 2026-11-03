@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.9
+// @version      0.12
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -112,6 +112,19 @@
         'X-Youtube-Client-Version': ytcfg.get('INNERTUBE_CLIENT_VERSION'),
       },
       body: JSON.stringify({ context: ytcfg.get('INNERTUBE_CONTEXT'), ...corpo }),
+    });
+    if (!r.ok) throw new Error(`YouTube ${r.status}`);
+    return r.json();
+  }
+
+  // Mesma API, mas como visitante anônimo (sem cookies nem login): as sugestões vêm sem a bolha dele
+  async function apiAnonima(endpoint, corpo) {
+    const versao = unsafeWindow.ytcfg?.get('INNERTUBE_CLIENT_VERSION');
+    if (!versao) throw new Error('YouTube sem configuração');
+    const r = await fetch(`/youtubei/v1/${endpoint}?prettyPrint=false`, {
+      method: 'POST', credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: versao, hl: 'pt', gl: 'BR' } }, ...corpo }),
     });
     if (!r.ok) throw new Error(`YouTube ${r.status}`);
     return r.json();
@@ -791,8 +804,11 @@
   // (no máximo LOTE_COLETA pedidos a cada COLETA_FURA_H horas, continuando de onde parou), mais os relacionados
   // das sementes e dos vídeos que ele clicou nessas fileiras (no mesmo nível), e manda para
   // dados/fura/candidatos.json. O GitHub junta num estoque, filtra, o Haiku dá as notas e as fileiras aparecem.
+  // Aleatório: os melhores vídeos achados pelas buscas (saida/fura_sementes.json) viram ponto de partida e o
+  // navegador pega as sugestões do YouTube para eles como visitante anônimo (SUGESTOES_POR_LOTE por vez, 1 vez cada).
   const COLETA_FURA_H = 2;
   const LOTE_COLETA = 50;
+  const SUGESTOES_POR_LOTE = 10;
   const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
 
   async function coletarFura() {
@@ -813,13 +829,18 @@
       .filter(c => (c.fileira || '').startsWith('fura_') && !feitas.has(c.id))
       .slice(-10)
       .map(c => ({ video: c.id, origem: { nivel: c.fileira.slice(5), semente: c.titulo || '', canal_semente: c.canal || '' } }));
+    let sementes = [];
+    try { sementes = JSON.parse(await github('GET', 'contents/saida/fura_sementes.json')).sementes || []; } catch (e) { /* ainda não existe */ }
+    const deSugestoes = sementes.filter(s => !feitas.has(s.id)).slice(0, SUGESTOES_POR_LOTE)
+      .map(s => ({ video: s.id, anonima: true, origem: { nivel: 'aleatorio', semente: s.titulo || '', canal_semente: s.canal || '' } }));
+    deCliques.push(...deSugestoes);
     const lote = [...deCliques, ...tarefas.slice(cursor.pos, cursor.pos + LOTE_COLETA - deCliques.length)];
     const itens = new Map();
     const juntar = (lista, origem) => { for (const v of lista) if (!itens.has(v.id)) itens.set(v.id, { ...v, origem }); };
     for (const t of lote) {
       try {
         if (t.busca) juntar(videosDoFeed(await api('search', { query: t.busca, params: BUSCA_SO_VIDEOS })), t.origem);
-        else juntar(videosDoFeed(await api('next', { videoId: t.video })), t.origem);
+        else juntar(videosDoFeed(await (t.anonima ? apiAnonima : api)('next', { videoId: t.video })), t.origem);
       } catch (e) { log(`coleta "${t.busca || t.video}" falhou:`, e.message); }
       await pausa();
     }
