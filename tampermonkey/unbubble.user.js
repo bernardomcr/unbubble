@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.8
+// @version      0.11.9
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1102,14 +1102,14 @@
   // Duas colunas: vídeo à esquerda e, embaixo dele, a descrição aberta e os comentários; à direita, sugestões
   // pequenas do mesmo grupo. Nada disso some do YouTube original: só esconde a grade de recomendados e os painéis.
   const CSS_ASSISTIR = `
-    /* Modo padrão: vídeo à esquerda ocupando o que sobra, sugestões numa coluna estreita encostada na borda direita */
+    /* Modo padrão: sugestões (400 px) encostadas na borda direita, vídeo logo antes delas; a sobra vira margem à esquerda */
     html[ub-assistir] ytd-watch-flexy #columns { display: flex !important; flex-direction: row !important;
-      justify-content: space-between !important; max-width: none !important; margin: 0 !important; padding: 0 24px !important;
+      justify-content: flex-end !important; max-width: none !important; margin: 0 !important; padding: 0 16px 0 24px !important;
       box-sizing: border-box !important; }
     html[ub-assistir] ytd-watch-flexy #primary { flex: 1 1 auto !important; min-width: 0 !important; width: auto !important;
       max-width: none !important; margin: 0 !important; padding: 0 !important; }
     html[ub-assistir] ytd-watch-flexy #secondary { position: static !important; display: block !important;
-      width: auto !important; flex: 1 1 340px !important; min-width: 340px !important; max-width: 440px !important; left: auto !important; right: auto !important;
+      width: 400px !important; flex: 0 0 400px !important; min-width: 0 !important; max-width: none !important; left: auto !important; right: auto !important;
       top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
       visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
     html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; pointer-events: auto !important; }
