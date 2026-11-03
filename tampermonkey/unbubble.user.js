@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.1
+// @version      0.11.2
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1112,13 +1112,12 @@
       width: 340px !important; flex: 0 0 340px !important; min-width: 0 !important; left: auto !important; right: auto !important;
       top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
       visibility: visible !important; opacity: 1 !important; }
-    html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; }
+    html[ub-assistir] ytd-watch-flexy #secondary-inner { width: 100% !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; }
     /* Modo teatro: vídeo na largura toda; embaixo, título/descrição/comentários à esquerda e sugestões à direita */
     html[ub-assistir][ub-teatro] ytd-watch-flexy #columns { display: grid !important; grid-template-columns: minmax(0, 1fr) 340px;
-      column-gap: 24px; }
+      column-gap: 24px; width: min(100% - 48px, (100vh - 192px) * 16 / 9) !important; margin: 0 auto !important; padding: 0 !important; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #primary, html[ub-assistir][ub-teatro] ytd-watch-flexy #primary-inner { display: contents !important; }
-    html[ub-assistir][ub-teatro] ytd-watch-flexy #player { grid-column: 1 / -1; grid-row: 1; width: 100%;
-      max-width: calc((100vh - 120px) * 16 / 9); justify-self: center; }
+    html[ub-assistir][ub-teatro] ytd-watch-flexy #player { grid-column: 1 / -1; grid-row: 1; width: 100%; max-width: none; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #below { grid-column: 1; grid-row: 2; min-width: 0; }
     html[ub-assistir][ub-teatro] ytd-watch-flexy #secondary { grid-column: 2; grid-row: 2; width: auto !important; margin: 0 !important; }
     html[ub-assistir] ytd-watch-flexy #related, html[ub-assistir] ytd-watch-flexy #secondary #panels,
@@ -1126,9 +1125,10 @@
     html[ub-assistir] ytd-watch-flexy #secondary ytd-watch-next-secondary-results-renderer,
     html[ub-assistir] ytd-watch-flexy #secondary-split-scroll-spacer, html[ub-assistir] ytd-watch-flexy #fixed-side-menu { display: none !important; }
     #ub-sobre, #ub-coments, #ub-lateral { --ub2-fundo: #f8f8f8; --ub2-borda: #e2e2e2; --ub2-texto: #333;
-      --ub2-texto2: #767676; --ub2-link: #167ac6; font-family: Arial, Helvetica, sans-serif; color: var(--ub2-texto); }
+      --ub2-texto2: #767676; --ub2-link: #167ac6; --ub2-hover: rgba(0,0,0,.1); --ub2-hover-azul: #def1ff;
+      font-family: Arial, Helvetica, sans-serif; color: var(--ub2-texto); }
     html[dark] #ub-sobre, html[dark] #ub-coments, html[dark] #ub-lateral { --ub2-fundo: #1b1b1b; --ub2-borda: #303030;
-      --ub2-texto: #e1e1e1; --ub2-texto2: #9a9a9a; --ub2-link: #4ea6ea; }
+      --ub2-texto: #e1e1e1; --ub2-texto2: #9a9a9a; --ub2-link: #4ea6ea; --ub2-hover: rgba(255,255,255,.1); --ub2-hover-azul: #263850; }
     #ub-sobre, #ub-coments { background: var(--ub2-fundo); border: 1px solid var(--ub2-borda); border-radius: 2px;
       padding: 14px 16px; margin: 12px 0; font-size: 13px; line-height: 1.45; }
     #ub-sobre .ub2-cab { font-weight: bold; margin: 0 0 8px; }
@@ -1148,15 +1148,42 @@
     .ub2-com .ub2-autor { font-weight: bold; }
     .ub2-com .ub2-quando { color: var(--ub2-texto2); margin-left: 6px; font-size: 11px; }
     .ub2-com .ub2-texto { white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0 4px; }
-    .ub2-com .ub2-rodape { color: var(--ub2-texto2); font-size: 11px; display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-    .ub2-like { background: transparent; border: 1px solid var(--ub2-borda); border-radius: 2px; color: var(--ub2-texto2);
-      font: 11px Arial, sans-serif; padding: 2px 8px; cursor: pointer; }
-    .ub2-like:hover { color: var(--ub2-texto); border-color: var(--ub2-texto2); }
-    .ub2-like.curtido { color: var(--ub2-link); border-color: var(--ub2-link); }
+    .ub2-com .ub2-rodape { display: flex; align-items: center; gap: 2px; margin: 4px 0 0 -8px; }
+    .ub2-com-corpo { flex: 1; min-width: 0; }
+    .ub2-acao { display: inline-flex; align-items: center; gap: 6px; height: 32px; min-width: 32px; padding: 0 8px;
+      border: 0; border-radius: 16px; background: transparent; color: var(--ub2-texto); cursor: pointer;
+      font: 500 12px Roboto, Arial, sans-serif; }
+    .ub2-acao:hover { background: var(--ub2-hover); }
+    .ub2-acao.ub2-so-icone { padding: 0; justify-content: center; width: 32px; }
+    .ub2-acao.ub2-texto-btn { padding: 0 12px; }
+    .ub2-acao .ub2-ico { width: 20px; height: 20px; fill: currentColor; }
+    .ub2-ver-respostas { display: inline-flex; align-items: center; height: 32px; margin: 4px 0 0 -8px; padding: 0 12px;
+      border: 0; border-radius: 16px; background: transparent; color: var(--ub2-link); cursor: pointer;
+      font: 500 13px Roboto, Arial, sans-serif; }
+    .ub2-ver-respostas:hover { background: var(--ub2-hover-azul); }
+    .ub2-respostas { margin-top: 4px; }
+    .ub2-com.ub2-resposta { padding: 10px 0; border-top: 0; }
+    .ub2-com.ub2-resposta img { width: 32px; height: 32px; }
+    .ub2-com img { border-radius: 50%; }
+    .ub2-escrever { display: flex; gap: 12px; margin: 0 0 16px; }
+    .ub2-escrever img { width: 40px; height: 40px; border-radius: 50%; flex: none; background: var(--ub2-borda); }
+    .ub2-com .ub2-escrever { margin: 8px 0 4px; }
+    .ub2-com .ub2-escrever img { width: 24px; height: 24px; }
+    .ub2-escrever-corpo { flex: 1; min-width: 0; }
+    .ub2-campo { width: 100%; box-sizing: border-box; resize: none; overflow: hidden; background: transparent; color: var(--ub2-texto);
+      border: 0; border-bottom: 1px solid var(--ub2-borda); padding: 4px 0; font: 14px Roboto, Arial, sans-serif; outline: none; }
+    .ub2-campo:focus { border-bottom: 2px solid var(--ub2-texto); }
+    .ub2-escrever-botoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .ub2-btn { height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: transparent; color: var(--ub2-texto);
+      font: 500 14px Roboto, Arial, sans-serif; cursor: pointer; }
+    .ub2-btn:hover { background: var(--ub2-hover); }
+    .ub2-btn-azul { background: #065fd4; color: #fff; }
+    .ub2-btn-azul:hover { background: #0556bf; }
+    .ub2-btn-azul:disabled { background: var(--ub2-hover); color: var(--ub2-texto2); cursor: default; }
     #ub-lateral { margin: 0 0 16px; font-size: 13px; }
     #ub-lateral .ub2-titulo { font-weight: bold; margin: 0 0 8px; padding: 0 0 6px; border-bottom: 1px solid var(--ub2-borda); }
     #ub-lateral .ub2-titulo span { color: var(--ub2-texto2); font-weight: normal; }
-    .ub2-sug { display: flex; gap: 8px; padding: 4px; margin: 0 0 4px; border-radius: 2px; color: inherit !important; }
+    .ub2-sug { display: flex; gap: 10px; padding: 6px; margin: 0 0 10px; border-radius: 8px; color: inherit !important; }
     .ub2-sug:hover { background: var(--ub2-fundo); text-decoration: none !important; }
     .ub2-sug .ub2-mini { position: relative; width: 150px; height: 84px; flex: none; background: var(--ub2-borda); overflow: hidden; }
     .ub2-sug .ub2-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -1213,7 +1240,7 @@
   }
 
   // Os comentários vêm em "entidades" separadas (texto, barra de ações, estado do like); a ordem certa é a dos
-  // commentViewModel, que apontam para elas pelas chaves.
+  // commentThreadRenderer/commentViewModel, que apontam para elas pelas chaves.
   function comentariosDe(j) {
     const ent = {};
     for (const m of achar(j, 'mutations').flat()) {
@@ -1222,7 +1249,7 @@
       if (tipo && p[tipo]?.key) ent[p[tipo].key] = p[tipo];
     }
     const acao = cmd => cmd?.innertubeCommand?.performCommentActionEndpoint?.action || null;
-    return achar(j, 'commentViewModel').filter(v => v.commentKey && ent[v.commentKey]).map(v => {
+    const montar = v => {
       const e = ent[v.commentKey], barra = ent[v.toolbarSurfaceKey] || {}, estado = ent[v.toolbarStateKey] || {};
       const curtido = estado.likeState === 'TOOLBAR_LIKE_STATE_LIKED';
       return {
@@ -1230,35 +1257,163 @@
         texto: e.properties?.content?.content || '', quando: e.properties?.publishedTime || '',
         likes: (curtido ? e.toolbar?.likeCountLiked : e.toolbar?.likeCountNotliked) || '', respostas: e.toolbar?.replyCount || '',
         curtido, curtir: acao(barra.likeCommand), descurtir: acao(barra.unlikeCommand),
+        negativado: estado.dislikeState === 'TOOLBAR_DISLIKE_STATE_DISLIKED',
+        negativar: acao(barra.dislikeCommand), desnegativar: acao(barra.undislikeCommand),
+        responder: achar(barra.replyCommand, 'createReplyParams')[0] || null,
       };
-    });
+    };
+    const threads = achar(j, 'commentThreadRenderer');
+    if (threads.length) {
+      return threads.map(t => {
+        const v = achar(t, 'commentViewModel').find(x => x?.commentKey && ent[x.commentKey]);
+        return v ? { ...montar(v), tokenRespostas: t.replies ? achar(t.replies, 'token')[0] || null : null } : null;
+      }).filter(Boolean);
+    }
+    return achar(j, 'commentViewModel').filter(v => v?.commentKey && ent[v.commentKey]).map(montar);  // respostas
   }
 
-  // Botão de like do comentário: usa a mesma ação que o botão do YouTube (perform_comment_action)
-  function botaoLike(c) {
-    let curtido = c.curtido;
+  const SVG_JOINHA = 'M9 21h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.58 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2zm0-12l4.34-4.34L12 10h9v2l-3 7H9V9zM1 9h4v12H1z';
+  const SVG_JOINHA_CHEIO = 'M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z';
+
+  // Botões de joinha (gostei / não gostei), no padrão atual do YouTube; usam a mesma ação que os botões dele
+  function botoesJoinha(c) {
+    let curtido = c.curtido, negativado = c.negativado;
     let n = /^\d+$/.test(c.likes) ? +c.likes : null;  // "1,2 mil" fica como está (não dá para somar)
-    const b = el('button', { class: 'ub2-like', title: 'Gostei' });
+    const icone2 = d => { const i = icone(d); i.classList.add('ub2-ico'); return i; };
+    const gostei = el('button', { class: 'ub2-acao', title: 'Gostei' });
+    const naoGostei = el('button', { class: 'ub2-acao ub2-so-icone', title: 'Não gostei' });
     const mostrar = () => {
-      b.textContent = `👍 ${n !== null ? (n || '') : c.likes}`.trim();
-      b.classList.toggle('curtido', curtido);
+      gostei.replaceChildren(icone2(curtido ? SVG_JOINHA_CHEIO : SVG_JOINHA),
+        el('span', {}, n !== null ? (n ? String(n) : '') : c.likes));
+      const baixo = icone2(negativado ? SVG_JOINHA_CHEIO : SVG_JOINHA);
+      baixo.style.transform = 'scaleY(-1)';
+      naoGostei.replaceChildren(baixo);
     };
-    mostrar();
-    b.addEventListener('click', async () => {
-      const acao = curtido ? c.descurtir : c.curtir;
-      if (!acao || b.disabled) return;
-      b.disabled = true;
-      try {
-        await api('comment/perform_comment_action', { actions: [acao] });
+    const enviar = async acao => {
+      if (!acao) return false;
+      try { await api('comment/perform_comment_action', { actions: [acao] }); return true; }
+      catch (e) { log('ação no comentário falhou:', e.message); return false; }
+    };
+    gostei.addEventListener('click', async () => {
+      if (gostei.disabled) return;
+      gostei.disabled = true;
+      if (await enviar(curtido ? c.descurtir : c.curtir)) {
         curtido = !curtido;
         if (n !== null) n += curtido ? 1 : -1;
+        if (curtido) negativado = false;
         mostrar();
-      } catch (e) {
-        log('like no comentário falhou:', e.message);
       }
-      b.disabled = false;
+      gostei.disabled = false;
     });
-    return b;
+    naoGostei.addEventListener('click', async () => {
+      if (naoGostei.disabled) return;
+      naoGostei.disabled = true;
+      if (await enviar(negativado ? c.desnegativar : c.negativar)) {
+        negativado = !negativado;
+        if (negativado && curtido) { curtido = false; if (n !== null) n -= 1; }
+        mostrar();
+      }
+      naoGostei.disabled = false;
+    });
+    mostrar();
+    return [gostei, naoGostei];
+  }
+
+  // Caixa de escrever (comentário novo ou resposta). enviar(texto) devolve true se deu certo.
+  function caixaEscrever(foto, dica, rotulo, enviar, aoFechar) {
+    const campo = el('textarea', { class: 'ub2-campo', rows: '1', placeholder: dica });
+    const ok = el('button', { class: 'ub2-btn ub2-btn-azul', disabled: '' }, rotulo);
+    const cancelar = el('button', { class: 'ub2-btn' }, 'Cancelar');
+    const botoes = el('div', { class: 'ub2-escrever-botoes' }, cancelar, ok);
+    botoes.hidden = !aoFechar;
+    const caixa = el('div', { class: 'ub2-escrever' },
+      el('img', { src: foto || '', alt: '' }), el('div', { class: 'ub2-escrever-corpo' }, campo, botoes));
+    campo.addEventListener('focus', () => { botoes.hidden = false; });
+    campo.addEventListener('input', () => {
+      campo.style.height = 'auto';
+      campo.style.height = `${campo.scrollHeight}px`;
+      ok.disabled = !campo.value.trim();
+    });
+    cancelar.addEventListener('click', () => {
+      campo.value = '';
+      ok.disabled = true;
+      if (aoFechar) aoFechar(); else botoes.hidden = true;
+    });
+    ok.addEventListener('click', async () => {
+      const texto = campo.value.trim();
+      if (!texto) return;
+      ok.disabled = true;
+      ok.textContent = 'Enviando…';
+      const deu = await enviar(texto);
+      ok.textContent = rotulo;
+      if (deu) {
+        campo.value = '';
+        campo.style.height = 'auto';
+        if (aoFechar) aoFechar(); else botoes.hidden = true;
+      } else {
+        ok.disabled = false;
+        ok.textContent = 'Tentar de novo';
+      }
+    });
+    if (aoFechar) setTimeout(() => campo.focus(), 0);
+    return caixa;
+  }
+
+  // Um comentário (ou resposta): foto, nome, quando, texto, joinhas, Responder e, se houver, as respostas
+  function umComentario(c, minhaFoto, resposta = false) {
+    const corpo = el('div', { class: 'ub2-com-corpo' });
+    const barra = el('div', { class: 'ub2-rodape' }, ...botoesJoinha(c));
+    let caixaResp = null;
+    const listaResp = el('div', { class: 'ub2-respostas' });
+    if (c.responder) {
+      const responder = el('button', { class: 'ub2-acao ub2-texto-btn' }, 'Responder');
+      responder.addEventListener('click', () => {
+        if (caixaResp) return caixaResp.querySelector('textarea').focus();
+        caixaResp = caixaEscrever(minhaFoto, 'Adicione uma resposta…', 'Responder', async texto => {
+          try {
+            await api('comment/create_comment_reply', { commentText: texto, createReplyParams: c.responder });
+            listaResp.prepend(umComentario({ autor: 'Você', texto, quando: 'agora', likes: '' }, minhaFoto, true));
+            return true;
+          } catch (e) { log('resposta falhou:', e.message); return false; }
+        }, () => { caixaResp.remove(); caixaResp = null; });
+        barra.after(caixaResp);
+      });
+      barra.append(responder);
+    }
+    corpo.append(
+      el('div', {}, el('a', { class: 'ub2-autor', href: c.canal ? `/channel/${c.canal}` : `/${c.autor}` }, c.autor),
+        el('span', { class: 'ub2-quando' }, c.quando)),
+      el('div', { class: 'ub2-texto' }, textoComLinks(c.texto)),
+      barra);
+    if (c.tokenRespostas) {
+      let token = c.tokenRespostas, aberto = false;
+      const n = c.respostas || '';
+      const abrir = el('button', { class: 'ub2-ver-respostas' }, `▾ ${n} resposta${n === '1' ? '' : 's'}`);
+      const mais = el('button', { class: 'ub2-ver-respostas' }, 'Mostrar mais respostas');
+      mais.hidden = true;
+      const carregar = async () => {
+        mais.disabled = abrir.disabled = true;
+        try {
+          const j = await api('next', { continuation: token });
+          for (const r of comentariosDe(j)) listaResp.append(umComentario(r, minhaFoto, true));
+          token = achar(j, 'continuationItemRenderer').map(x => achar(x, 'token')[0]).filter(Boolean).pop() || null;
+        } catch (e) { log('respostas falharam:', e.message); token = null; }
+        mais.hidden = !token;
+        mais.disabled = abrir.disabled = false;
+      };
+      abrir.addEventListener('click', async () => {
+        aberto = !aberto;
+        abrir.textContent = `${aberto ? '▴' : '▾'} ${n} resposta${n === '1' ? '' : 's'}`;
+        listaResp.hidden = !aberto;
+        mais.hidden = !aberto || !token;
+        if (aberto && !listaResp.children.length) await carregar();
+      });
+      mais.addEventListener('click', carregar);
+      listaResp.hidden = true;
+      corpo.append(abrir, listaResp, mais);
+    } else corpo.append(listaResp);
+    return el('div', { class: 'ub2-com' + (resposta ? ' ub2-resposta' : '') },
+      el('img', { src: c.foto || minhaFoto || '', alt: '', loading: 'lazy' }), corpo);
   }
 
   function caixaComentarios(tokenInicial) {
@@ -1266,7 +1421,7 @@
     const lista = el('div', {});
     const botao = el('button', { class: 'ub2-botao' }, 'Mostrar mais comentários');
     const caixa = el('div', { id: 'ub-coments' }, titulo, lista, botao);
-    let token = tokenInicial;
+    let token = tokenInicial, minhaFoto = '', escrever = null;
     const carregar = async () => {
       if (!token) { botao.remove(); return; }
       botao.disabled = true;
@@ -1275,16 +1430,20 @@
         const j = await api('next', { continuation: token });
         const total = achar(j, 'commentsHeaderRenderer').map(h => texto(h.countText)).filter(Boolean)[0];
         if (total) titulo.replaceChildren('Comentários ', el('span', {}, `(${total.replace(/\D+$/, '').trim()})`));
-        for (const c of comentariosDe(j)) {
-          lista.append(el('div', { class: 'ub2-com' },
-            el('img', { src: c.foto, alt: '', loading: 'lazy' }),
-            el('div', {},
-              el('div', {}, el('a', { class: 'ub2-autor', href: c.canal ? `/channel/${c.canal}` : `/${c.autor}` }, c.autor),
-                el('span', { class: 'ub2-quando' }, c.quando)),
-              el('div', { class: 'ub2-texto' }, textoComLinks(c.texto)),
-              el('div', { class: 'ub2-rodape' }, botaoLike(c),
-                c.respostas ? `${c.respostas} resposta${c.respostas === '1' ? '' : 's'}` : ''))));
+        const box = achar(j, 'commentSimpleboxRenderer')[0];
+        const params = achar(j, 'createCommentParams')[0];
+        if (box && params && !escrever) {
+          minhaFoto = achar(box.authorThumbnail, 'url').pop() || '';
+          escrever = caixaEscrever(minhaFoto, 'Adicione um comentário…', 'Comentar', async textoNovo => {
+            try {
+              await api('comment/create_comment', { commentText: textoNovo, createCommentParams: params });
+              lista.prepend(umComentario({ autor: 'Você', texto: textoNovo, quando: 'agora', likes: '' }, minhaFoto));
+              return true;
+            } catch (e) { log('comentário falhou:', e.message); return false; }
+          });
+          titulo.after(escrever);
         }
+        for (const c of comentariosDe(j)) lista.append(umComentario(c, minhaFoto));
         token = achar(j, 'continuationItemRenderer').map(c => achar(c, 'token')[0]).filter(Boolean).pop();
       } catch (e) {
         log('comentários falharam:', e.message);
