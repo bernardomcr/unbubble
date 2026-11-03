@@ -28,6 +28,10 @@ Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Vi
 - **Banco dos amigos (pilar 2, futuro):** Google Apps Script + planilha, protegido por senha do grupo.
 - **Regra de segurança:** se qualquer parte falhar (inclusive crédito de IA acabado), a home cai para o modo sem IA ou para a home original do YouTube. Nunca página em branco.
 
+## Foco (decidido em 03/nov/2026)
+
+O esforço e o gasto de IA vão para duas coisas: **(1) Dos seus canais** (inscrições, incluindo as que ele gostaria mas ficaram perdidas) e **(2) uma fileira nova para furar a bolha** ("o ouro"). Em Alta e Mais vistos ficam (custam quase nada), mas não são o foco. As fileiras "Em alta: categoria" foram **tiradas**: o YouTube já tem esses temas e o algoritmo dele é melhor nisso. Sonnet o mínimo possível (caro); Haiku e regras sem IA fazem o grosso.
+
 ## Curador pessoal com IA (decidido em 02/nov/2026)
 
 **Dados (lidos no navegador, sem cota):** histórico do YouTube (com quanto de cada vídeo foi visto), Google Takeout 1x (histórico completo de anos), inscritos, curtidas, playlists, histórico de buscas, chips da home (os temas do Bernardo na visão do YouTube) e, daqui para frente, o registro do próprio script (cliques, tempo assistido, o que foi mostrado e ignorado).
