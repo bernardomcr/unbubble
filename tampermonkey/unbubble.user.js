@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.10.0
-// @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
+// @version      0.11.0
+// @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
 // @run-at       document-idle
@@ -237,6 +237,7 @@
                    fileira, motivo: item.motivo || '', em: new Date().toISOString() });
     GM_setValue('cliques', cliques.slice(-2000));
     GM_setValue('uso_novo', true);
+    salvarContexto(fileira);
   }
 
   function registrarMostrado(id, fileira) {
@@ -413,6 +414,13 @@
     #unbubble .ub-capa { display: block; position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
       background: var(--ub-fundo-capa); }
     #unbubble .ub-capa img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #unbubble .ub-dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.8); color: #fff;
+      font-size: 1.2rem; font-weight: 500; line-height: 1.8rem; padding: 0 4px; border-radius: 4px; }
+    #unbubble .ub-dur.ao-vivo { background: #cc0000; }
+    #unbubble .ub-previa, .ub2-mini .ub-previa { position: absolute; inset: 0; background-repeat: no-repeat; background-color: #000; }
+    #unbubble .ub-previa-barra, .ub2-mini .ub-previa-barra { position: absolute; left: 0; bottom: 0; height: 3px; background: #f00; }
+    #unbubble a.ub-canal { color: inherit; text-decoration: none; }
+    #unbubble a.ub-canal[href]:hover { color: var(--ub-texto); }
     #unbubble .ub-selo { position: absolute; left: 8px; top: 8px; background: ${COR}; color: #fff;
       font-size: 1.1rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
     #unbubble .ub-info { display: flex; gap: 4px; align-items: flex-start; }
@@ -494,7 +502,12 @@
       el('img', { src: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, alt: '', loading: 'lazy' }));
     if (item.motivo === 'esquecido') capa.append(el('span', { class: 'ub-selo', title: 'Canal que você via e parou' }, 'resgate'));
     else if (item.selo) capa.append(el('span', { class: 'ub-selo', title: 'Combina com os seus interesses' }, item.selo));
+    const dur = el('span', { class: 'ub-dur' }, item.duracao || '');
+    dur.hidden = !item.duracao;
+    capa.append(dur);
+    previaNoMouse(capa, item.id);
     const meta = item.meta || (item.views != null ? `${views(item.views)} · ${quando(item.publicado)}` : '');
+    const canal = el('a', { class: 'ub-canal', ...(item.canal_id ? { href: `/channel/${item.canal_id}` } : {}) }, item.canal || '');
     const c = el('div', { class: 'ub-card' });
     const mais = el('button', { class: 'ub-mais', title: 'Mais opções', 'aria-label': 'Mais opções' }, icone(SVG_MAIS));
     mais.addEventListener('click', e => {
@@ -518,7 +531,7 @@
       el('div', { class: 'ub-textos' },
         el('a', { href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
           el('div', { class: 'ub-nome', title: item.titulo }, item.titulo)),
-        el('div', { class: 'ub-meta' }, item.canal || ''),
+        el('div', { class: 'ub-meta' }, canal),
         el('div', { class: 'ub-meta', title: meta }, meta)),
       mais));
     c.dataset.canal = item.canal || '';
@@ -558,15 +571,19 @@
         el('h2', { class: 'ub-titulo' }, titulo)),
       el('div', { class: 'ub-linha' }, esq, trilho, dir));
     const ids = new Set();
+    const grupo = { titulo, itens: [] };
+    grupos.set(id, grupo);
     const por = (lista) => {
       for (const i of lista) {
         if (!i?.id || ids.has(i.id) || bloqueado(i)) continue;
         ids.add(i.id);
+        grupo.itens.push(i);
         const c = card(i, id);
         c.dataset.id = i.id;
         c.dataset.fileira = id;
         trilho.append(c);
         olhoDaTela.observe(c);
+        olhoInfo.observe(c);
       }
     };
     por(itens);
@@ -932,6 +949,379 @@
     observador.observe(contents, { childList: true });
   }
 
+  // ---------- Informações de cada vídeo (duração, canal, quadros de prévia, descrição) ----------
+  // Uma consulta leve ao YouTube por vídeo (/youtubei/v1/player, a mesma que a página faz), só quando o card aparece
+  // na tela, no máximo 3 de cada vez. Duração e canal ficam guardados para a próxima vez; o resto fica na memória.
+  const infoMem = new Map();
+  let infoRodando = 0;
+  const infoFila = [];
+  const infoGuardada = GM_getValue('info_videos', {});
+  let infoSalvar = null;
+
+  function duracaoTexto(seg) {
+    seg = Math.round(seg || 0);
+    if (!seg) return '';
+    const h = Math.floor(seg / 3600), m = Math.floor((seg % 3600) / 60), s = seg % 60;
+    return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + `:${String(s).padStart(2, '0')}`;
+  }
+
+  function infoVideo(id) {
+    if (infoMem.has(id)) return infoMem.get(id);
+    const p = new Promise((ok, falha) => {
+      infoFila.push(async () => {
+        try {
+          const j = await api('player', { videoId: id });
+          const vd = j.videoDetails || {};
+          const mf = j.microformat?.playerMicroformatRenderer || {};
+          const spec = j.storyboards?.playerStoryboardSpecRenderer?.spec;
+          let sb = null;
+          if (spec) {
+            const partes = spec.split('|');
+            const niveis = partes.slice(1).map((s, i) => {
+              const [, , count, cols, rows, , name, sigh] = s.split('#');
+              return { L: i, count: +count, cols: +cols, rows: +rows, name, sigh };
+            }).filter(n => n.count && n.cols && n.rows);
+            const n = niveis[niveis.length - 1];
+            if (n) sb = { ...n, url: folha => `${partes[0].replace('$L', n.L).replace('$N', n.name.replace('$M', folha))}&sigh=${n.sigh}` };
+          }
+          const info = { dur: +vd.lengthSeconds || 0, ao_vivo: !!vd.isLive, canal_id: vd.channelId || '', canal: vd.author || '',
+                         titulo: vd.title || '', views: +vd.viewCount || 0, desc: vd.shortDescription || '',
+                         publicado: mf.publishDate || mf.uploadDate || '', sb };
+          infoGuardada[id] = [info.dur, info.canal_id, info.ao_vivo ? 1 : 0];
+          clearTimeout(infoSalvar);
+          infoSalvar = setTimeout(() => {
+            const ks = Object.keys(infoGuardada);
+            for (const k of ks.slice(0, Math.max(0, ks.length - 3000))) delete infoGuardada[k];
+            GM_setValue('info_videos', infoGuardada);
+          }, 3000);
+          ok(info);
+        } catch (e) {
+          infoMem.delete(id);
+          falha(e);
+        }
+      });
+      puxarFilaInfo();
+    });
+    infoMem.set(id, p);
+    return p;
+  }
+
+  function puxarFilaInfo() {
+    while (infoRodando < 3 && infoFila.length) {
+      infoRodando++;
+      infoFila.shift()().finally(() => { infoRodando--; puxarFilaInfo(); });
+    }
+  }
+
+  // Completa o card quando ele aparece na tela: duração no canto da capa e o canal virando link
+  const olhoInfo = new IntersectionObserver(entradas => {
+    for (const e of entradas) {
+      if (!e.isIntersecting) continue;
+      olhoInfo.unobserve(e.target);
+      completarCard(e.target);
+    }
+  }, { rootMargin: '200px' });
+
+  function completarCard(c) {
+    const id = c.dataset.id;
+    const guardada = infoGuardada[id];
+    const aplicar = (dur, canalId, aoVivo) => {
+      const selo = c.querySelector('.ub-dur');
+      if (selo && !selo.textContent) {
+        selo.textContent = aoVivo ? 'AO VIVO' : duracaoTexto(dur);
+        selo.classList.toggle('ao-vivo', !!aoVivo);
+        selo.hidden = !selo.textContent;
+      }
+      const canal = c.querySelector('.ub-canal');
+      if (canal && canalId && !canal.getAttribute('href')) canal.setAttribute('href', `/channel/${canalId}`);
+    };
+    if (guardada) return aplicar(guardada[0], guardada[1], guardada[2]);
+    const selo = c.querySelector('.ub-dur'), canal = c.querySelector('.ub-canal');
+    if (selo?.textContent && canal?.getAttribute('href')) return;
+    infoVideo(id).then(i => aplicar(i.dur, i.canal_id, i.ao_vivo)).catch(() => {});
+  }
+
+  // Prévia ao passar o mouse: os quadros que o YouTube usa na barra de tempo, animados (sem som, não conta
+  // como visualização e não entra no histórico). O mini-player embutido é bloqueado dentro do youtube.com (erro 152).
+  function previaNoMouse(capa, id) {
+    let espera = null, relogio = null, tela = null;
+    capa.addEventListener('mouseenter', () => {
+      espera = setTimeout(async () => {
+        let info;
+        try { info = await infoVideo(id); } catch (e) { return; }
+        const sb = info.sb;
+        if (!sb || !capa.matches(':hover')) return;
+        const barra = el('div', { class: 'ub-previa-barra' });
+        tela = el('div', { class: 'ub-previa' }, barra);
+        capa.append(tela);
+        const porFolha = sb.cols * sb.rows;
+        const passo = Math.max(1, Math.floor(sb.count / 40));
+        let f = Math.min(passo * 2, sb.count - 1);
+        new Image().src = sb.url(0);
+        const mostrar = () => {
+          const folha = Math.floor(f / porFolha), k = f % porFolha;
+          new Image().src = sb.url(folha + 1);  // já vai buscando a próxima folha
+          tela.style.backgroundImage = `url("${sb.url(folha)}")`;
+          tela.style.backgroundSize = `${sb.cols * 100}% ${sb.rows * 100}%`;
+          const x = sb.cols > 1 ? ((k % sb.cols) / (sb.cols - 1)) * 100 : 0;
+          const y = sb.rows > 1 ? (Math.floor(k / sb.cols) / (sb.rows - 1)) * 100 : 0;
+          tela.style.backgroundPosition = `${x}% ${y}%`;
+          barra.style.width = `${(f / sb.count) * 100}%`;
+          f = (f + passo) % sb.count;
+        };
+        mostrar();
+        relogio = setInterval(mostrar, 450);
+      }, 500);
+    });
+    capa.addEventListener('mouseleave', () => {
+      clearTimeout(espera);
+      clearInterval(relogio);
+      tela?.remove();
+      tela = null;
+    });
+  }
+
+  // ---------- Grupo de onde ele veio (para as sugestões da página do vídeo) ----------
+  // Ao clicar num vídeo de uma fileira, guarda a fileira inteira; na página do vídeo, a lateral mostra esse grupo
+  // e, quando o vídeo acaba, vai para o próximo do grupo, não para o que o algoritmo do YouTube escolheria.
+  const grupos = new Map();  // id da fileira -> { titulo, itens }
+
+  function salvarContexto(fileira) {
+    const g = grupos.get(fileira);
+    if (!g) return;  // na página do vídeo, o contexto que já está guardado continua valendo
+    GM_setValue('contexto', {
+      fileira, titulo: g.titulo, em: agora(),
+      itens: g.itens.slice(0, 150).map(i => ({
+        id: i.id, titulo: i.titulo || '', canal: i.canal || '', canal_id: i.canal_id || '', duracao: i.duracao || '',
+        meta: i.meta || (i.views != null ? `${views(i.views)} · ${quando(i.publicado)}` : ''), motivo: i.motivo || '',
+      })),
+    });
+  }
+
+  // ---------- Página do vídeo no estilo 2010–2014 ----------
+  // Duas colunas: vídeo à esquerda e, embaixo dele, a descrição aberta e os comentários; à direita, sugestões
+  // pequenas do mesmo grupo. Nada disso some do YouTube original: só esconde a grade de recomendados e os painéis.
+  const CSS_ASSISTIR = `
+    html[ub-assistir] ytd-watch-flexy #columns { display: flex !important; flex-direction: row !important;
+      justify-content: center !important; max-width: 1560px !important; margin: 0 auto !important; }
+    html[ub-assistir] ytd-watch-flexy #primary { flex: 1 1 auto !important; min-width: 0 !important;
+      max-width: min(1100px, calc(100% - 450px)) !important; }
+    html[ub-assistir] ytd-watch-flexy #secondary { position: static !important; display: block !important;
+      width: 402px !important; flex: 0 0 402px !important; left: auto !important; right: auto !important;
+      top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
+      visibility: visible !important; opacity: 1 !important; }
+    html[ub-assistir] ytd-watch-flexy #related, html[ub-assistir] ytd-watch-flexy #secondary #panels,
+    html[ub-assistir] ytd-watch-flexy ytd-comments#comments, html[ub-assistir] ytd-watch-metadata #description,
+    html[ub-assistir] ytd-watch-flexy #secondary ytd-watch-next-secondary-results-renderer,
+    html[ub-assistir] ytd-watch-flexy #secondary-split-scroll-spacer, html[ub-assistir] ytd-watch-flexy #fixed-side-menu { display: none !important; }
+    #ub-sobre, #ub-coments, #ub-lateral { --ub2-fundo: #f8f8f8; --ub2-borda: #e2e2e2; --ub2-texto: #333;
+      --ub2-texto2: #767676; --ub2-link: #167ac6; font-family: Arial, Helvetica, sans-serif; color: var(--ub2-texto); }
+    html[dark] #ub-sobre, html[dark] #ub-coments, html[dark] #ub-lateral { --ub2-fundo: #1b1b1b; --ub2-borda: #303030;
+      --ub2-texto: #e1e1e1; --ub2-texto2: #9a9a9a; --ub2-link: #4ea6ea; }
+    #ub-sobre, #ub-coments { background: var(--ub2-fundo); border: 1px solid var(--ub2-borda); border-radius: 2px;
+      padding: 14px 16px; margin: 12px 0; font-size: 13px; line-height: 1.45; }
+    #ub-sobre .ub2-cab { font-weight: bold; margin: 0 0 8px; }
+    #ub-sobre .ub2-cab span { font-weight: normal; color: var(--ub2-texto2); }
+    #ub-sobre .ub2-desc { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #ub-sobre .ub2-desc.fechada { max-height: 9.5em; overflow: hidden; }
+    #ub-sobre a, #ub-coments a, #ub-lateral a { color: var(--ub2-link); text-decoration: none; }
+    #ub-sobre a:hover, #ub-coments a:hover, #ub-lateral a:hover { text-decoration: underline; }
+    .ub2-botao { display: block; width: 100%; margin: 10px 0 0; padding: 6px; background: transparent; cursor: pointer;
+      border: 0; border-top: 1px solid var(--ub2-borda); color: var(--ub2-texto2); font: bold 11px Arial, sans-serif;
+      text-transform: uppercase; letter-spacing: .03em; }
+    .ub2-botao:hover { color: var(--ub2-texto); }
+    #ub-coments h3 { font-size: 13px; font-weight: bold; margin: 0 0 12px; }
+    #ub-coments h3 span { color: var(--ub2-texto2); font-weight: normal; }
+    .ub2-com { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--ub2-borda); }
+    .ub2-com img { width: 48px; height: 48px; flex: none; background: var(--ub2-borda); }
+    .ub2-com .ub2-autor { font-weight: bold; }
+    .ub2-com .ub2-quando { color: var(--ub2-texto2); margin-left: 6px; font-size: 11px; }
+    .ub2-com .ub2-texto { white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0 4px; }
+    .ub2-com .ub2-rodape { color: var(--ub2-texto2); font-size: 11px; }
+    #ub-lateral { margin: 0 0 16px; font-size: 13px; }
+    #ub-lateral .ub2-titulo { font-weight: bold; margin: 0 0 8px; padding: 0 0 6px; border-bottom: 1px solid var(--ub2-borda); }
+    #ub-lateral .ub2-titulo span { color: var(--ub2-texto2); font-weight: normal; }
+    .ub2-sug { display: flex; gap: 8px; padding: 4px; margin: 0 0 4px; border-radius: 2px; color: inherit !important; }
+    .ub2-sug:hover { background: var(--ub2-fundo); text-decoration: none !important; }
+    .ub2-sug .ub2-mini { position: relative; width: 168px; height: 94px; flex: none; background: var(--ub2-borda); overflow: hidden; }
+    .ub2-sug .ub2-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ub2-sug .ub2-nome { font-weight: bold; color: var(--ub2-texto); display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+    .ub2-sug .ub2-info { color: var(--ub2-texto2); font-size: 11px; margin-top: 3px; line-height: 1.4; }
+    .ub-dur, .ub2-dur { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,.8); color: #fff;
+      font: 500 12px Roboto, Arial, sans-serif; padding: 1px 4px; border-radius: 4px; line-height: 16px; }
+    .ub-dur.ao-vivo, .ub2-dur.ao-vivo { background: #cc0000; }
+  `;
+
+  function instalarCssAssistir() {
+    if (document.getElementById('ub-css-assistir')) return;
+    document.head.append(el('style', { id: 'ub-css-assistir' }, CSS_ASSISTIR));
+  }
+
+  // Texto com links: URLs viram links e marcas de tempo (1:23) pulam o vídeo para aquele ponto
+  function textoComLinks(texto) {
+    const frag = document.createDocumentFragment();
+    const re = /(https?:\/\/[^\s]+)|(\b\d{1,2}:\d{2}(?::\d{2})?\b)/g;
+    let ultimo = 0, m;
+    while ((m = re.exec(texto))) {
+      if (m.index > ultimo) frag.append(texto.slice(ultimo, m.index));
+      if (m[1]) {
+        frag.append(el('a', { href: m[1], target: '_blank', rel: 'noopener' }, m[1]));
+      } else {
+        const seg = m[2].split(':').reduce((a, b) => a * 60 + +b, 0);
+        frag.append(el('a', { href: '#', onclick: e => { e.preventDefault(); const v = document.querySelector('video'); if (v) { v.currentTime = seg; v.play(); } } }, m[2]));
+      }
+      ultimo = m.index + m[0].length;
+    }
+    if (ultimo < texto.length) frag.append(texto.slice(ultimo));
+    return frag;
+  }
+
+  function dataBonita(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  function caixaSobre(info) {
+    const desc = el('div', { class: 'ub2-desc fechada' }, textoComLinks(info.desc || 'Sem descrição.'));
+    const botao = el('button', { class: 'ub2-botao' }, 'Mostrar mais');
+    botao.addEventListener('click', () => {
+      const fechada = desc.classList.toggle('fechada');
+      botao.textContent = fechada ? 'Mostrar mais' : 'Mostrar menos';
+    });
+    const caixa = el('div', { id: 'ub-sobre' },
+      el('div', { class: 'ub2-cab' }, `Publicado em ${dataBonita(info.publicado)}`,
+        el('span', {}, ` · ${info.views.toLocaleString('pt-BR')} visualizações`)),
+      desc, botao);
+    requestAnimationFrame(() => { if (desc.scrollHeight <= desc.clientHeight + 4) botao.remove(); });
+    return caixa;
+  }
+
+  function comentariosDe(j) {
+    return achar(j, 'commentEntityPayload').map(e => ({
+      autor: e.author?.displayName || '', canal: e.author?.channelId || '', foto: e.author?.avatarThumbnailUrl || '',
+      texto: e.properties?.content?.content || '', quando: e.properties?.publishedTime || '',
+      likes: e.toolbar?.likeCountNotliked || '', respostas: e.toolbar?.replyCount || '',
+    }));
+  }
+
+  function caixaComentarios(tokenInicial) {
+    const titulo = el('h3', {}, 'Comentários');
+    const lista = el('div', {});
+    const botao = el('button', { class: 'ub2-botao' }, 'Mostrar mais comentários');
+    const caixa = el('div', { id: 'ub-coments' }, titulo, lista, botao);
+    let token = tokenInicial;
+    const carregar = async () => {
+      if (!token) { botao.remove(); return; }
+      botao.disabled = true;
+      botao.textContent = 'Carregando…';
+      try {
+        const j = await api('next', { continuation: token });
+        const total = achar(j, 'commentsHeaderRenderer').map(h => texto(h.countText)).filter(Boolean)[0];
+        if (total) titulo.replaceChildren('Comentários ', el('span', {}, `(${total.replace(/\D+$/, '').trim()})`));
+        for (const c of comentariosDe(j)) {
+          lista.append(el('div', { class: 'ub2-com' },
+            el('img', { src: c.foto, alt: '', loading: 'lazy' }),
+            el('div', {},
+              el('div', {}, el('a', { class: 'ub2-autor', href: c.canal ? `/channel/${c.canal}` : `/${c.autor}` }, c.autor),
+                el('span', { class: 'ub2-quando' }, c.quando)),
+              el('div', { class: 'ub2-texto' }, textoComLinks(c.texto)),
+              el('div', { class: 'ub2-rodape' },
+                [c.likes && c.likes !== '0' ? `👍 ${c.likes}` : '', c.respostas ? `${c.respostas} resposta${c.respostas === '1' ? '' : 's'}` : '']
+                  .filter(Boolean).join(' · ')))));
+        }
+        token = achar(j, 'continuationItemRenderer').map(c => achar(c, 'token')[0]).filter(Boolean).pop();
+      } catch (e) {
+        log('comentários falharam:', e.message);
+        token = null;
+      }
+      botao.disabled = false;
+      botao.textContent = 'Mostrar mais comentários';
+      if (!token) botao.remove();
+    };
+    botao.addEventListener('click', carregar);
+    if (!tokenInicial) {
+      titulo.textContent = 'Comentários desativados';
+      botao.remove();
+    } else carregar();
+    return caixa;
+  }
+
+  function sugestaoPequena(item, fileira) {
+    const capa = el('div', { class: 'ub2-mini' }, el('img', { src: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, alt: '', loading: 'lazy' }));
+    const dur = item.duracao || (infoGuardada[item.id] ? (infoGuardada[item.id][2] ? 'AO VIVO' : duracaoTexto(infoGuardada[item.id][0])) : '');
+    if (dur) capa.append(el('span', { class: 'ub2-dur' + (dur === 'AO VIVO' ? ' ao-vivo' : '') }, dur));
+    previaNoMouse(capa, item.id);
+    return el('a', { class: 'ub2-sug', href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
+      capa,
+      el('div', {},
+        el('div', { class: 'ub2-nome', title: item.titulo }, item.titulo),
+        el('div', { class: 'ub2-info' }, item.canal || '', el('br'), item.meta || '')));
+  }
+
+  let assistindo = null;
+  async function montarAssistir() {
+    const id = new URLSearchParams(location.search).get('v');
+    if (location.pathname !== '/watch' || !id) {
+      document.documentElement.removeAttribute('ub-assistir');
+      assistindo = null;
+      return;
+    }
+    if (assistindo === id && document.getElementById('ub-sobre')) return;
+    assistindo = id;
+    const fim = agora() + 15000;
+    let meta, lateral;
+    while (agora() < fim) {
+      meta = document.querySelector('ytd-watch-flexy ytd-watch-metadata');
+      lateral = document.querySelector('ytd-watch-flexy #secondary-inner') || document.querySelector('ytd-watch-flexy #secondary');
+      if (meta && lateral) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    if (!meta || !lateral || assistindo !== id) return;
+    try {
+      const [info, prox] = await Promise.all([infoVideo(id), api('next', { videoId: id })]);
+      if (assistindo !== id) return;
+      for (const velho of document.querySelectorAll('#ub-sobre, #ub-coments, #ub-lateral')) velho.remove();
+      instalarCssAssistir();
+      // Grupo: só se este vídeo veio de uma das fileiras (está na lista guardada no clique); senão, relacionados do YouTube
+      const ctx = GM_getValue('contexto', null);
+      const doGrupo = ctx && ctx.itens?.some(i => i.id === id);
+      let itens, cab, fileiraCtx;
+      if (doGrupo) {
+        itens = ctx.itens.filter(i => i.id !== id && !bloqueado(i));
+        cab = ['Mais de ', el('span', {}, `“${ctx.titulo}”`)];
+        fileiraCtx = ctx.fileira;
+      } else {
+        itens = videosDoFeed(achar(prox, 'secondaryResults')[0] || prox).filter(i => i.id !== id && !bloqueado(i));
+        cab = ['Relacionados ', el('span', {}, '(sugestões do YouTube)')];
+        fileiraCtx = 'yt_relacionados';
+      }
+      const caixaLateral = el('div', { id: 'ub-lateral' }, el('div', { class: 'ub2-titulo' }, ...cab),
+        ...itens.slice(0, 40).map(i => sugestaoPequena(i, fileiraCtx)));
+      lateral.prepend(caixaLateral);
+      const tok = achar(prox, 'itemSectionRenderer').filter(s => s.sectionIdentifier === 'comment-item-section')
+        .map(s => achar(s, 'token')[0]).filter(Boolean)[0];
+      meta.after(caixaSobre(info), caixaComentarios(tok));
+      document.documentElement.setAttribute('ub-assistir', '');
+      window.dispatchEvent(new Event('resize'));  // o YouTube recalcula o tamanho do vídeo para a coluna nova
+      // Fim do vídeo: o próximo do mesmo grupo (só quando veio de uma fileira)
+      const video = document.querySelector('ytd-watch-flexy video');
+      if (doGrupo && video) {
+        const lista = ctx.itens.filter(i => !bloqueado(i));
+        const proximo = lista[lista.findIndex(i => i.id === id) + 1];
+        if (proximo) {
+          video.addEventListener('ended', () => {
+            if (assistindo === id) location.href = `/watch?v=${proximo.id}`;
+          }, { once: true });
+        }
+      }
+      log(`página do vídeo: ${itens.length} sugestões (${doGrupo ? 'grupo ' + ctx.titulo : 'YouTube'}), comentários ${tok ? 'sim' : 'não'}`);
+    } catch (e) {
+      log('página do vídeo ficou como a original:', e.message);
+      document.documentElement.removeAttribute('ub-assistir');
+    }
+  }
+
   // ---------- Encaixe na home do YouTube ----------
   function alvo() {
     return document.querySelector('ytd-browse[page-subtype="home"] ytd-rich-grid-renderer #contents');
@@ -1036,6 +1426,19 @@
   GM_registerMenuCommand('Buscar candidatos para furar a bolha agora', () => coletarFuraSeHora(true));
   GM_registerMenuCommand('Atualizar fileiras agora', () => { GM_setValue('home_cache', null); GM_setValue('ultimo_disparo', 0); location.reload(); });
   window.addEventListener('yt-navigate-finish', montar);
+  window.addEventListener('yt-navigate-finish', () => montarAssistir().catch(e => log('página do vídeo:', e.message)));
+  montarAssistir().catch(e => log('página do vídeo:', e.message));
+  // Se o YouTube refizer a página do vídeo (ou algo falhar), monta de novo, no máximo 3 vezes por vídeo
+  const tentativas = new Map();
+  setInterval(() => {
+    const id = new URLSearchParams(location.search).get('v');
+    if (location.pathname !== '/watch' || !id || document.getElementById('ub-sobre')) return;
+    const n = tentativas.get(id) || 0;
+    if (n >= 3) return;
+    tentativas.set(id, n + 1);
+    assistindo = null;
+    montarAssistir().catch(() => {});
+  }, 3000);
   montar();
   setTimeout(() => capturarSeHora(), 8000);  // depois da página carregar, sem atrapalhar
   setTimeout(() => coletarFuraSeHora(), 20000);
