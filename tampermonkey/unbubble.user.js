@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.11.6
+// @version      0.11.7
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -1107,7 +1107,6 @@
       justify-content: space-between !important; max-width: none !important; margin: 0 !important; padding: 0 24px !important; }
     html[ub-assistir] ytd-watch-flexy #primary { flex: 1 1 auto !important; min-width: 0 !important; width: auto !important;
       max-width: none !important; margin: 0 !important; padding: 0 !important; }
-    html[ub-assistir] ytd-watch-flexy #player { max-width: calc((100vh - 150px) * 16 / 9); }
     html[ub-assistir] ytd-watch-flexy #secondary { position: static !important; display: block !important;
       width: 340px !important; flex: 0 0 340px !important; min-width: 0 !important; left: auto !important; right: auto !important;
       top: auto !important; transform: none !important; margin: 0 0 0 24px !important; padding: 0 !important; height: auto !important;
@@ -1514,24 +1513,29 @@
     }
   }
 
-  // No teatro, o YouTube escolhe o maior vídeo que cabe na tela; depois disso as colunas de baixo (título, descrição,
-  // comentários e sugestões) ficam com a largura exata do vídeo, alinhadas às bordas dele. Refaz quando a janela muda.
+  // O YouTube escolhe o maior vídeo que cabe na tela; depois disso o que fica embaixo dele (título, views, botões,
+  // descrição, comentários) fica com a largura exata do vídeo, alinhado às bordas dele. No teatro, as colunas de baixo
+  // inteiras; no padrão, a coluna do vídeo (a lateral continua encostada na borda direita). Refaz quando a janela muda.
   let medida = null;
   function ajustarLarguraTeatro() {
     const cols = document.querySelector('ytd-watch-flexy #columns');
-    if (!cols) return;
+    const prim = document.querySelector('ytd-watch-flexy #primary');
+    if (!cols || !prim) return;
     cols.style.removeProperty('width');
+    prim.style.removeProperty('max-width');
     clearTimeout(medida);
-    if (!document.documentElement.hasAttribute('ub-teatro')) return;
+    if (!document.documentElement.hasAttribute('ub-assistir')) return;
+    const teatro = document.documentElement.hasAttribute('ub-teatro');
     medida = setTimeout(() => {
       const w = document.querySelector('ytd-watch-flexy .html5-video-player')?.getBoundingClientRect().width;
-      if (w && w < cols.getBoundingClientRect().width - 2) cols.style.setProperty('width', `${Math.round(w)}px`, 'important');
+      const alvo = teatro ? cols : prim;
+      if (w && w < alvo.getBoundingClientRect().width - 2) alvo.style.setProperty(teatro ? 'width' : 'max-width', `${Math.round(w)}px`, 'important');
       alinharLateral();
     }, 700);
   }
   let esperaJanela = null;
   window.addEventListener('resize', e => {
-    if (!e.isTrusted || !document.documentElement.hasAttribute('ub-teatro')) return;  // só quando a janela muda de verdade
+    if (!e.isTrusted || !document.documentElement.hasAttribute('ub-assistir')) return;  // só quando a janela muda de verdade
     clearTimeout(esperaJanela);
     esperaJanela = setTimeout(() => {
       ajustarLarguraTeatro();
