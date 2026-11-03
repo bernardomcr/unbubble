@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.6.2
+// @version      0.7.0
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -94,12 +94,14 @@
     return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
   }
 
-  async function browse(corpo) {
+  const browse = corpo => api('browse', corpo);
+
+  async function api(endpoint, corpo) {
     const ytcfg = unsafeWindow.ytcfg;
     const sapisid = (document.cookie.match(/(?:^|; )(?:SAPISID|__Secure-3PAPISID)=([^;]+)/) || [])[1];
     if (!ytcfg || !sapisid) throw new Error('YouTube sem login ou sem configuração');
     const ts = Math.floor(agora() / 1000);
-    const r = await fetch('/youtubei/v1/browse?prettyPrint=false', {
+    const r = await fetch(`/youtubei/v1/${endpoint}?prettyPrint=false`, {
       method: 'POST', credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
@@ -336,6 +338,8 @@
       -webkit-box-orient: vertical; overflow: hidden; }
     #unbubble .ub-meta { font-size: 1.2rem; line-height: 1.8rem; color: var(--ub-texto2);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #unbubble .ub-porque { white-space: normal; color: ${COR}; display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; }
     #unbubble .ub-mais { flex: none; width: 32px; height: 32px; margin-top: 6px; border-radius: 50%; border: 0;
       background: transparent; color: var(--ub-texto); cursor: pointer; padding: 0; opacity: 0;
       display: flex; align-items: center; justify-content: center; }
@@ -433,7 +437,7 @@
         el('a', { href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
           el('div', { class: 'ub-nome', title: item.titulo }, item.titulo)),
         el('div', { class: 'ub-meta' }, item.canal || ''),
-        el('div', { class: 'ub-meta' }, meta)),
+        el('div', { class: item.motivo === 'fura' ? 'ub-meta ub-porque' : 'ub-meta', title: meta }, meta)),
       mais));
     c.dataset.canal = item.canal || '';
     return c;
@@ -512,10 +516,12 @@
   function desenharFileiras(caixa, home) {
     const ui = (f) => { if (f.itens?.length) { const s = fileira(f.id, f.titulo, f.itens); if (!s._vazia()) caixa.append(s); } };
     const fs = home.fileiras || [];
-    const nossas = fs.filter(f => !f.id.startsWith('cat_'));
-    for (const f of nossas.slice(0, 1)) ui(f);
-    caixa.append(el('div', { id: 'ub-rec-yt' }));    // Recomendados pelo YouTube (com teto) logo depois de Dos seus canais
-    for (const f of nossas.slice(1)) ui(f);
+    // Primeiro as que olham para ele (Dos seus canais, Fora da sua bolha), depois os recomendados do YouTube,
+    // depois o que o Brasil está vendo (Em Alta, Mais vistos)
+    const doBrasil = f => f.id === 'em_alta' || f.id === 'mais_vistos';
+    for (const f of fs.filter(f => !doBrasil(f) && !f.id.startsWith('cat_'))) ui(f);
+    caixa.append(el('div', { id: 'ub-rec-yt' }));    // Recomendados pelo YouTube (com teto)
+    for (const f of fs.filter(doBrasil)) ui(f);
     caixa.append(el('div', { id: 'ub-temas-yt' }));  // fileiras dos temas do próprio YouTube entram aqui
     for (const f of fs.filter(f => f.id.startsWith('cat_'))) ui(f);
   }
@@ -534,11 +540,15 @@
       if (prog && prog.startPercent >= 50) continue;  // já visto
       const linhas = achar(md.metadata, 'metadataRows')[0] || [];
       const partes = linhas.map(r => (r.metadataParts || []).map(p => p.text?.content).filter(Boolean));
-      out.push({ id: l.contentId, titulo: texto(md.title), canal: partes[0]?.[0] || '', meta: (partes[1] || []).join(' • ') });
+      out.push({ id: l.contentId, titulo: texto(md.title), canal: partes[0]?.[0] || '', meta: (partes[1] || []).join(' • '),
+                 canal_id: achar(md.metadata, 'browseEndpoint')[0]?.browseId || '',
+                 duracao: achar(l.contentImage, 'thumbnailBadgeViewModel').map(b => b.text).filter(Boolean)[0] || '' });
     }
     for (const v of achar(j, 'videoRenderer')) {
       out.push({ id: v.videoId, titulo: texto(v.title), canal: texto(v.ownerText) || texto(v.shortBylineText),
-                 meta: [texto(v.shortViewCountText) || texto(v.viewCountText), texto(v.publishedTimeText)].filter(Boolean).join(' • ') });
+                 meta: [texto(v.shortViewCountText) || texto(v.viewCountText), texto(v.publishedTimeText)].filter(Boolean).join(' • '),
+                 canal_id: v.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || '',
+                 duracao: texto(v.lengthText) });
     }
     return out.filter(v => /^[\w-]{11}$/.test(v.id || ''));
   }
@@ -608,6 +618,56 @@
     GM_setValue('token', t.trim());
     GM_setValue('home_cache', null);
     location.reload();
+  }
+
+  // ---------- Coleta para a fileira que fura a bolha (grátis: busca e relacionados do próprio YouTube) ----------
+  // O Sonnet escolhe 1x/semana os rumos (saida/rumos.json: buscas + sementes). Aqui o navegador faz as buscas e
+  // pega os relacionados das sementes, sem cota, e manda tudo para dados/fura/candidatos.json. O GitHub filtra,
+  // o Haiku dá as notas e a fileira aparece na home.
+  const COLETA_FURA_H = 6;
+  const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
+
+  async function coletarFura() {
+    const rumos = JSON.parse(await github('GET', 'contents/saida/rumos.json'));
+    const itens = new Map();
+    const juntar = (lista, origem) => { for (const v of lista) if (!itens.has(v.id)) itens.set(v.id, { ...v, origem }); };
+    for (const r of rumos.rumos || []) {
+      for (const q of (r.buscas || []).slice(0, 2)) {
+        try { juntar(videosDoFeed(await api('search', { query: q, params: BUSCA_SO_VIDEOS })), { rumo: r.nome, tipo: r.tipo, busca: q }); }
+        catch (e) { log(`busca "${q}" falhou:`, e.message); }
+        await pausa();
+      }
+    }
+    for (const s of rumos.sementes || []) {
+      try { juntar(videosDoFeed(await api('next', { videoId: s.id })), { semente: s.titulo, canal_semente: s.canal }); }
+      catch (e) { log(`relacionados de ${s.id} falharam:`, e.message); }
+      await pausa();
+    }
+    return { coletado_em: new Date().toISOString(), rumos_de: rumos.gerado_em, itens: [...itens.values()] };
+  }
+
+  let coletandoFura = false;
+  async function coletarFuraSeHora(forcar = false) {
+    if (coletandoFura || !GM_getValue('token', '')) return;
+    if (!forcar && agora() - GM_getValue('ultima_coleta_fura', 0) < COLETA_FURA_H * 36e5) return;
+    coletandoFura = true;
+    GM_setValue('ultima_coleta_fura', agora());
+    try {
+      const c = await coletarFura();
+      if (c.itens.length < 30) throw new Error(`coleta estranha, só ${c.itens.length} vídeos`);
+      const caminho = 'contents/dados/fura/candidatos.json';
+      let sha;
+      try { sha = JSON.parse(await github('GET', caminho, null, { json: true })).sha; } catch (e) { /* ainda não existe */ }
+      await github('PUT', caminho, {
+        message: `Candidatos para furar a bolha (${c.itens.length})`,
+        content: base64(JSON.stringify(c)), ...(sha ? { sha } : {}),
+      }, { json: true, tempo: 60000 });
+      log(`fura-bolha: ${c.itens.length} candidatos enviados`);
+    } catch (e) {
+      log('coleta do fura-bolha falhou:', e.message);
+    } finally {
+      coletandoFura = false;
+    }
   }
 
   // ---------- Teto por tema nos recomendados do YouTube ----------
@@ -721,7 +781,7 @@
     return null;
   }
 
-  let rodando = false;
+  let rodando = false, jaMontou = false, errosMontar = 0;
   async function montar() {
     if (location.pathname !== '/' || rodando) return;
     rodando = true;
@@ -745,6 +805,7 @@
       caixa.style.marginLeft = `${Math.max(g.left - pai.left, 0)}px`;
       caixa.style.marginRight = `${Math.max(pai.right - g.right, 0)}px`;
       contents.before(caixa);
+      jaMontou = true;
       log(`home montada: ${caixa.querySelectorAll('.ub-fileira').length} fileiras nossas`);
       if (!GM_getValue('token', '')) return;
       // Substitui a grade infinita do YouTube pelas fileiras, mas só se houver fileira de verdade
@@ -762,6 +823,7 @@
         .catch(e => log('fileiras do YouTube falharam:', e.message))
         .finally(substituir);
     } catch (e) {
+      errosMontar++;
       log('erro, home original mantida:', e);
     } finally {
       rodando = false;
@@ -779,14 +841,15 @@
   // Vigia: o YouTube às vezes recria a grade da home depois de carregar (e leva as fileiras junto), ou
   // traz uma grade nova visível. Se as fileiras sumiram, monta de novo; se a grade voltou, esconde.
   let remontagens = 0;
-  window.addEventListener('yt-navigate-finish', () => { remontagens = 0; });
+  window.addEventListener('yt-navigate-finish', () => { remontagens = 0; errosMontar = 0; });
   function vigiar() {
     if (location.pathname !== '/' || rodando || !GM_getValue('token', '')) return;
     const caixa = document.getElementById('unbubble');
     if (!caixa) {
-      if (remontagens >= 3) return;  // algo quebrado: desiste e deixa a home original (sem ficar insistindo)
-      remontagens++;
-      log('fileiras sumiram da página, montando de novo');
+      // Ainda carregando: tenta de novo. Deu erro 3 vezes ou sumiu 3 vezes depois de montada: desiste e deixa
+      // a home original (sem ficar insistindo).
+      if (errosMontar >= 3 || remontagens >= 3) return;
+      if (jaMontou) { remontagens++; log('fileiras sumiram da página, montando de novo'); }
       montar();
       return;
     }
@@ -802,8 +865,10 @@
 
   GM_registerMenuCommand('Conectar / trocar token', configurarToken);
   GM_registerMenuCommand('Capturar meu histórico agora', () => capturarSeHora(true));
+  GM_registerMenuCommand('Buscar candidatos para furar a bolha agora', () => coletarFuraSeHora(true));
   GM_registerMenuCommand('Atualizar fileiras agora', () => { GM_setValue('home_cache', null); GM_setValue('ultimo_disparo', 0); location.reload(); });
   window.addEventListener('yt-navigate-finish', montar);
   montar();
   setTimeout(() => capturarSeHora(), 8000);  // depois da página carregar, sem atrapalhar
+  setTimeout(() => coletarFuraSeHora(), 20000);
 })();

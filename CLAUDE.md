@@ -32,6 +32,12 @@ Formato: **script de Tampermonkey** (um script só para Chrome/Firefox/Edge). Vi
 
 O esforço e o gasto de IA vão para duas coisas: **(1) Dos seus canais** (inscrições, incluindo as que ele gostaria mas ficaram perdidas) e **(2) uma fileira nova para furar a bolha** ("o ouro"). Em Alta e Mais vistos ficam (custam quase nada), mas não são o foco. As fileiras "Em alta: categoria" foram **tiradas**: o YouTube já tem esses temas e o algoritmo dele é melhor nisso. Sonnet o mínimo possível (caro); Haiku e regras sem IA fazem o grosso.
 
+**Fileira "Fora da sua bolha" (feita em 03/nov/2026, script v0.7):** logo depois de Dos seus canais.
+1. `ia/rumos.py` (Sonnet, **no máximo 1x/semana**, roda dentro do `home.yml`; ~US$ 0,04 por vez): lê o mapa do raio-x, os últimos 7 dias e as recusas, devolve 10–15 rumos (adormecido / vizinho / novo, 2 buscas cada) + 15 sementes sem IA (curtidas e vistos até o fim, duração 4–90 min, fora dos temas em excesso, 1 por canal) em `saida/rumos.json`.
+2. O navegador (a cada 6 h, 20 s depois de abrir) faz as buscas (`/youtubei/v1/search`, filtro só vídeos) e pega os relacionados das sementes (`/youtubei/v1/next`), sem cota, e manda para `dados/fura/candidatos.json` (~700). Menu: "Buscar candidatos para furar a bolha agora".
+3. `ia/fura.py` (dentro do `home.py`): filtro sem IA (nada visto, canal nunca visto nem inscrito, sem recusados, 3–90 min, 1 por canal) e o Haiku dá, uma vez por vídeo, afinidade 0–10, distância da bolha 0–10, tema e um porquê de até 15 palavras (`saida/fura_notas.json`; ~US$ 0,01 por 240 vídeos). Entra com afinidade >= 5 e distância >= 4, sem esporte/religião/política/caça-clique; ordem por afinidade + 0,7 × distância; máx. 2 por rumo/semente; 30 vídeos. O porquê aparece em azul embaixo do vídeo.
+- Falta: os cliques irem para o GitHub (hoje ficam só no navegador) para o rumo que rende ganhar peso e o que é ignorado ~3x recuar.
+
 ## Curador pessoal com IA (decidido em 02/nov/2026)
 
 **Dados (lidos no navegador, sem cota):** histórico do YouTube (com quanto de cada vídeo foi visto), Google Takeout 1x (histórico completo de anos), inscritos, curtidas, playlists, histórico de buscas, chips da home (os temas do Bernardo na visão do YouTube) e, daqui para frente, o registro do próprio script (cliques, tempo assistido, o que foi mostrado e ignorado).
