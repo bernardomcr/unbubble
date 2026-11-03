@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.9.2
+// @version      0.10.0
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -422,8 +422,6 @@
       -webkit-box-orient: vertical; overflow: hidden; }
     #unbubble .ub-meta { font-size: 1.2rem; line-height: 1.8rem; color: var(--ub-texto2);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #unbubble .ub-porque { white-space: normal; color: ${COR}; display: -webkit-box; -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical; }
     #unbubble .ub-mais { flex: none; width: 32px; height: 32px; margin-top: 6px; border-radius: 50%; border: 0;
       background: transparent; color: var(--ub-texto); cursor: pointer; padding: 0; opacity: 0;
       display: flex; align-items: center; justify-content: center; }
@@ -521,7 +519,7 @@
         el('a', { href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
           el('div', { class: 'ub-nome', title: item.titulo }, item.titulo)),
         el('div', { class: 'ub-meta' }, item.canal || ''),
-        el('div', { class: item.motivo === 'fura' ? 'ub-meta ub-porque' : 'ub-meta', title: meta }, meta)),
+        el('div', { class: 'ub-meta', title: meta }, meta)),
       mais));
     c.dataset.canal = item.canal || '';
     return c;
@@ -771,29 +769,46 @@
     location.reload();
   }
 
-  // ---------- Coleta para a fileira que fura a bolha (grátis: busca e relacionados do próprio YouTube) ----------
-  // O Sonnet escolhe 1x/semana os rumos (saida/rumos.json: buscas + sementes). Aqui o navegador faz as buscas e
-  // pega os relacionados das sementes, sem cota, e manda tudo para dados/fura/candidatos.json. O GitHub filtra,
-  // o Haiku dá as notas e a fileira aparece na home.
-  const COLETA_FURA_H = 6;
+  // ---------- Coleta para as fileiras fora da bolha (grátis: busca e relacionados do próprio YouTube) ----------
+  // O Sonnet escolhe 1x/semana as buscas por nível (saida/rumos.json). Aqui o navegador faz um lote por vez
+  // (no máximo LOTE_COLETA pedidos a cada COLETA_FURA_H horas, continuando de onde parou), mais os relacionados
+  // das sementes e dos vídeos que ele clicou nessas fileiras (no mesmo nível), e manda para
+  // dados/fura/candidatos.json. O GitHub junta num estoque, filtra, o Haiku dá as notas e as fileiras aparecem.
+  const COLETA_FURA_H = 2;
+  const LOTE_COLETA = 50;
   const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
 
   async function coletarFura() {
     const rumos = JSON.parse(await github('GET', 'contents/saida/rumos.json'));
-    const itens = new Map();
-    const juntar = (lista, origem) => { for (const v of lista) if (!itens.has(v.id)) itens.set(v.id, { ...v, origem }); };
+    const tarefas = [];
     for (const r of rumos.rumos || []) {
-      for (const q of (r.buscas || []).slice(0, 2)) {
-        try { juntar(videosDoFeed(await api('search', { query: q, params: BUSCA_SO_VIDEOS })), { rumo: r.nome, tipo: r.tipo, busca: q }); }
-        catch (e) { log(`busca "${q}" falhou:`, e.message); }
-        await pausa();
-      }
+      for (const q of r.buscas || []) tarefas.push({ busca: q, origem: { nivel: r.nivel || 'medio', rumo: r.nome, busca: q } });
     }
     for (const s of rumos.sementes || []) {
-      try { juntar(videosDoFeed(await api('next', { videoId: s.id })), { semente: s.titulo, canal_semente: s.canal }); }
-      catch (e) { log(`relacionados de ${s.id} falharam:`, e.message); }
+      tarefas.push({ video: s.id, origem: { nivel: 'perto', semente: s.titulo, canal_semente: s.canal } });
+    }
+    // Volta de onde parou; se os rumos mudaram (nova semana), recomeça
+    let cursor = GM_getValue('cursor_fura', { de: '', pos: 0 });
+    if (cursor.de !== rumos.gerado_em || cursor.pos >= tarefas.length) cursor = { de: rumos.gerado_em, pos: 0 };
+    // Vídeos que ele clicou nas fileiras fora da bolha: os relacionados entram no mesmo nível (uma vez cada)
+    const feitas = new Set(GM_getValue('sementes_cliques', []));
+    const deCliques = GM_getValue('cliques', [])
+      .filter(c => (c.fileira || '').startsWith('fura_') && !feitas.has(c.id))
+      .slice(-10)
+      .map(c => ({ video: c.id, origem: { nivel: c.fileira.slice(5), semente: c.titulo || '', canal_semente: c.canal || '' } }));
+    const lote = [...deCliques, ...tarefas.slice(cursor.pos, cursor.pos + LOTE_COLETA - deCliques.length)];
+    const itens = new Map();
+    const juntar = (lista, origem) => { for (const v of lista) if (!itens.has(v.id)) itens.set(v.id, { ...v, origem }); };
+    for (const t of lote) {
+      try {
+        if (t.busca) juntar(videosDoFeed(await api('search', { query: t.busca, params: BUSCA_SO_VIDEOS })), t.origem);
+        else juntar(videosDoFeed(await api('next', { videoId: t.video })), t.origem);
+      } catch (e) { log(`coleta "${t.busca || t.video}" falhou:`, e.message); }
       await pausa();
     }
+    GM_setValue('cursor_fura', { de: rumos.gerado_em, pos: cursor.pos + lote.length - deCliques.length });
+    GM_setValue('sementes_cliques', [...feitas, ...deCliques.map(t => t.video)].slice(-500));
+    log(`fura-bolha: lote de ${lote.length} pedidos (${cursor.pos}–${cursor.pos + lote.length - deCliques.length} de ${tarefas.length})`);
     return { coletado_em: new Date().toISOString(), rumos_de: rumos.gerado_em, itens: [...itens.values()] };
   }
 
@@ -805,7 +820,7 @@
     GM_setValue('ultima_coleta_fura', agora());
     try {
       const c = await coletarFura();
-      if (c.itens.length < 30) throw new Error(`coleta estranha, só ${c.itens.length} vídeos`);
+      if (c.itens.length < 10) throw new Error(`coleta estranha, só ${c.itens.length} vídeos`);
       const caminho = 'contents/dados/fura/candidatos.json';
       let sha;
       try { sha = JSON.parse(await github('GET', caminho, null, { json: true })).sha; } catch (e) { /* ainda não existe */ }
