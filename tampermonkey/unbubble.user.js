@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.4.2
-// @description  Home anti-bolha do YouTube: fileiras Dos seus canais, Em Alta e Mais vistos, teto por tema nos recomendados e captura do histórico.
+// @version      0.5.0
+// @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
 // @run-at       document-idle
@@ -228,37 +228,144 @@
     GM_setValue('cliques', cliques.slice(-2000));
   }
 
+  // ---------- "Não tenho interesse" ----------
+  // Fica guardado no navegador e vai para dados/feedback/nao_interesse.json do repo privado
+  // (junta com o que já estiver lá, para os dois PCs somarem). O GitHub refaz as fileiras e o Haiku
+  // passa a dar nota baixa para coisas parecidas.
+  const ENVIO_RECUSAS_S = 15;
+  const chaveRecusa = r => (r.tipo === 'canal' ? `c:${r.canal}` : `v:${r.id}`);
+  const bloq = { videos: new Set(), canais: new Set() };
+
+  function carregarBloqueios(home) {
+    for (const v of home?.bloqueios?.videos || []) bloq.videos.add(v);
+    for (const c of home?.bloqueios?.canais || []) bloq.canais.add(c);
+    const desfeitas = new Set(GM_getValue('recusas_desfeitas', []));
+    for (const r of GM_getValue('recusas', [])) {
+      if (r.tipo === 'canal') bloq.canais.add(r.canal); else bloq.videos.add(r.id);
+    }
+    for (const k of desfeitas) { if (k.startsWith('c:')) bloq.canais.delete(k.slice(2)); else bloq.videos.delete(k.slice(2)); }
+  }
+  const bloqueado = it => bloq.videos.has(it.id) || bloq.canais.has(it.canal);
+
+  function recusar(item, tipo, fileira) {
+    const r = { id: item.id, titulo: item.titulo || '', canal: item.canal || '', tipo, fileira, em: new Date().toISOString() };
+    const k = chaveRecusa(r);
+    GM_setValue('recusas', [...GM_getValue('recusas', []).filter(x => chaveRecusa(x) !== k), r]);
+    GM_setValue('recusas_desfeitas', GM_getValue('recusas_desfeitas', []).filter(x => x !== k));
+    if (tipo === 'canal') bloq.canais.add(r.canal); else bloq.videos.add(r.id);
+    agendarEnvioRecusas();
+    return k;
+  }
+
+  function desfazerRecusa(k) {
+    GM_setValue('recusas', GM_getValue('recusas', []).filter(x => chaveRecusa(x) !== k));
+    GM_setValue('recusas_desfeitas', [...new Set([...GM_getValue('recusas_desfeitas', []), k])]);
+    if (k.startsWith('c:')) bloq.canais.delete(k.slice(2)); else bloq.videos.delete(k.slice(2));
+    agendarEnvioRecusas();
+  }
+
+  let esperaRecusas = null;
+  function agendarEnvioRecusas() {
+    clearTimeout(esperaRecusas);
+    esperaRecusas = setTimeout(() => enviarRecusas().catch(e => log('não consegui mandar as recusas:', e.message)),
+      ENVIO_RECUSAS_S * 1000);
+  }
+
+  async function enviarRecusas() {
+    const caminho = 'contents/dados/feedback/nao_interesse.json';
+    let sha, remotas = [];
+    try {
+      const r = JSON.parse(await github('GET', caminho, null, { json: true }));
+      sha = r.sha;
+      const bytes = Uint8Array.from(atob(r.content.replace(/\n/g, '')), c => c.charCodeAt(0));
+      remotas = JSON.parse(new TextDecoder().decode(bytes)).itens || [];
+    } catch (e) { /* ainda não existe */ }
+    const desfeitas = new Set(GM_getValue('recusas_desfeitas', []));
+    const juntas = new Map();
+    for (const r of [...remotas, ...GM_getValue('recusas', [])]) juntas.set(chaveRecusa(r), r);
+    for (const k of desfeitas) juntas.delete(k);
+    const itens = [...juntas.values()].sort((a, b) => (a.em < b.em ? -1 : 1));
+    await github('PUT', caminho, {
+      message: `Não tenho interesse (${itens.length})`,
+      content: base64(JSON.stringify({ atualizado_em: new Date().toISOString(), itens }, null, 1)), ...(sha ? { sha } : {}),
+    }, { json: true, tempo: 30000 });
+    GM_setValue('recusas', itens);  // agora o navegador tem também as do outro PC
+    GM_setValue('recusas_desfeitas', []);
+    GM_setValue('home_cache', null);  // a próxima abertura já pega as fileiras refeitas
+    log(`recusas enviadas: ${itens.length}`);
+  }
+
   // ---------- Desenho ----------
   const CSS = `
     #unbubble { --ub-texto: #0f0f0f; --ub-texto2: #606060; --ub-fundo-capa: #e5e5e5;
-      align-self: stretch; min-width: 0; box-sizing: border-box; margin: 8px 0 24px;
+      --ub-botao: #ffffff; --ub-menu: #ffffff; --ub-hover: rgba(0,0,0,.08);
+      align-self: stretch; min-width: 0; box-sizing: border-box; margin: 16px 0 24px;
       font-family: Roboto, Arial, sans-serif; }
-    html[dark] #unbubble { --ub-texto: #f1f1f1; --ub-texto2: #aaaaaa; --ub-fundo-capa: #272727; }
-    #unbubble .ub-cab { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; }
-    #unbubble .ub-titulo { font-size: 2rem; font-weight: 700; color: var(--ub-texto); margin: 0; }
+    html[dark] #unbubble { --ub-texto: #f1f1f1; --ub-texto2: #aaaaaa; --ub-fundo-capa: #272727;
+      --ub-botao: #212121; --ub-menu: #282828; --ub-hover: rgba(255,255,255,.1); }
+    #unbubble .ub-cab { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; }
+    #unbubble .ub-titulo { font-size: 2rem; line-height: 2.8rem; font-weight: 700; color: var(--ub-texto); margin: 0; }
     #unbubble .ub-marca { font-size: 1.2rem; font-weight: 700; color: ${COR}; letter-spacing: .02em; }
-    #unbubble .ub-bolha { width: 12px; height: 12px; border: 2px dashed ${COR}; border-radius: 50%; flex: none; align-self: center; }
+    #unbubble .ub-bolha { width: 12px; height: 12px; border: 2px dashed ${COR}; border-radius: 50%; flex: none; }
+    #unbubble .ub-fileira { margin: 0 0 40px; }
+    #unbubble .ub-linha { position: relative; }
     #unbubble .ub-trilho { display: grid; grid-auto-flow: column; grid-auto-columns: 260px;
-      gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; }
-    #unbubble .ub-card { scroll-snap-align: start; text-decoration: none; color: inherit; display: block; min-width: 0; }
-    #unbubble .ub-capa { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
+      gap: 16px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
+    #unbubble .ub-trilho::-webkit-scrollbar { display: none; }
+    #unbubble .ub-seta { position: absolute; top: 73px; transform: translateY(-50%); z-index: 3;
+      width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+      background: var(--ub-botao); color: var(--ub-texto); display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 4px rgba(0,0,0,.3), 0 0 4px rgba(0,0,0,.2);
+      opacity: 0; pointer-events: none; transition: opacity .2s; }
+    #unbubble .ub-seta svg { width: 24px; height: 24px; fill: currentColor; pointer-events: none; }
+    #unbubble .ub-seta.dir { right: -20px; }
+    #unbubble .ub-seta.esq { left: -20px; }
+    #unbubble .ub-seta.esq svg { transform: scaleX(-1); }
+    #unbubble .ub-seta.dir.ativa, #unbubble .ub-linha:hover .ub-seta.esq.ativa { opacity: 1; pointer-events: auto; }
+    #unbubble .ub-card { scroll-snap-align: start; min-width: 0; position: relative; }
+    #unbubble .ub-card a { text-decoration: none; color: inherit; }
+    #unbubble .ub-capa { display: block; position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
       background: var(--ub-fundo-capa); }
     #unbubble .ub-capa img { width: 100%; height: 100%; object-fit: cover; display: block; }
     #unbubble .ub-selo { position: absolute; left: 8px; top: 8px; background: ${COR}; color: #fff;
       font-size: 1.1rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+    #unbubble .ub-info { display: flex; gap: 4px; align-items: flex-start; }
+    #unbubble .ub-textos { flex: 1; min-width: 0; }
     #unbubble .ub-nome { font-size: 1.4rem; font-weight: 500; line-height: 2rem; margin: 10px 0 2px;
       color: var(--ub-texto); display: -webkit-box; -webkit-line-clamp: 2;
       -webkit-box-orient: vertical; overflow: hidden; }
-    #unbubble .ub-meta { font-size: 1.2rem; line-height: 1.8rem; color: var(--ub-texto2); }
+    #unbubble .ub-meta { font-size: 1.2rem; line-height: 1.8rem; color: var(--ub-texto2);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #unbubble .ub-mais { flex: none; width: 32px; height: 32px; margin-top: 6px; border-radius: 50%; border: 0;
+      background: transparent; color: var(--ub-texto); cursor: pointer; padding: 0; opacity: 0;
+      display: flex; align-items: center; justify-content: center; }
+    #unbubble .ub-mais svg { width: 20px; height: 20px; fill: currentColor; }
+    #unbubble .ub-card:hover .ub-mais, #unbubble .ub-mais.aberto { opacity: 1; }
+    #unbubble .ub-mais:hover { background: var(--ub-hover); }
+    #unbubble .ub-menu { position: fixed; z-index: 2300; min-width: 230px;
+      background: var(--ub-menu); border-radius: 12px; padding: 8px 0; box-shadow: 0 4px 32px rgba(0,0,0,.25); }
+    #unbubble .ub-menu div { padding: 0 16px; height: 36px; display: flex; align-items: center;
+      font-size: 1.4rem; color: var(--ub-texto); cursor: pointer; white-space: nowrap; }
+    #unbubble .ub-menu div:hover { background: var(--ub-hover); }
+    #unbubble .ub-removido { aspect-ratio: 16 / 9; border-radius: 12px; background: var(--ub-fundo-capa);
+      display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 10px;
+      padding: 16px; box-sizing: border-box; font-size: 1.3rem; line-height: 1.8rem; color: var(--ub-texto); }
+    #unbubble .ub-removido button { background: transparent; color: ${COR}; padding: 0; font-size: 1.4rem; }
     #unbubble .ub-aviso { font-size: 1.4rem; color: var(--ub-texto2); }
     #unbubble button { background: ${COR}; color: #fff; border: 0; border-radius: 999px; padding: 6px 14px;
       font-size: 1.3rem; font-weight: 600; cursor: pointer; }
+    #unbubble button.ub-seta, #unbubble button.ub-mais { background: var(--ub-botao); }
+    #unbubble button.ub-mais { background: transparent; }
   `;
+
+  const SVG_SETA = '<svg viewBox="0 0 24 24"><path d="M9.4 18.4l-.7-.7 5.6-5.6-5.7-5.7.7-.7 6.4 6.4-6.3 6.3z"/></svg>';
+  const SVG_MAIS = '<svg viewBox="0 0 24 24"><path d="M12 16.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zM10.5 12c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5zm0-6c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5z"/></svg>';
 
   function el(tag, attrs = {}, ...filhos) {
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (k === 'class') e.className = v;
+      else if (k === 'html') e.innerHTML = v;  // só para os ícones fixos acima
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v);
     }
@@ -277,16 +384,110 @@
     return `${n} visualizações`;
   }
 
+  let menuAberto = null;
+  function fecharMenu() {
+    menuAberto?.menu.remove();
+    menuAberto?.botao.classList.remove('aberto');
+    menuAberto = null;
+  }
+  document.addEventListener('click', e => { if (menuAberto && !menuAberto.menu.contains(e.target)) fecharMenu(); }, true);
+  window.addEventListener('scroll', () => fecharMenu(), { passive: true });
+  document.addEventListener('scroll', e => { if (e.target?.classList?.contains('ub-trilho')) fecharMenu(); }, { capture: true, passive: true });
+
   function card(item, fileira) {
-    const capa = el('div', { class: 'ub-capa' },
+    const capa = el('a', { class: 'ub-capa', href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
       el('img', { src: `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`, alt: '', loading: 'lazy' }));
     if (item.motivo === 'esquecido') capa.append(el('span', { class: 'ub-selo', title: 'Canal que você via e parou' }, 'resgate'));
     else if (item.selo) capa.append(el('span', { class: 'ub-selo', title: 'Combina com os seus interesses' }, item.selo));
-    return el('a', { class: 'ub-card', href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
-      capa,
-      el('div', { class: 'ub-nome', title: item.titulo }, item.titulo),
-      el('div', { class: 'ub-meta' }, item.canal),
-      el('div', { class: 'ub-meta' }, item.meta || `${views(item.views)} · ${quando(item.publicado)}`));
+    const meta = item.meta || (item.views != null ? `${views(item.views)} · ${quando(item.publicado)}` : '');
+    const c = el('div', { class: 'ub-card' });
+    const mais = el('button', { class: 'ub-mais', title: 'Mais opções', 'aria-label': 'Mais opções', html: SVG_MAIS });
+    mais.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      const jaAberto = menuAberto?.botao === mais;
+      fecharMenu();
+      if (jaAberto) return;
+      const opcao = (texto, tipo) => el('div', { onclick: ev => { ev.stopPropagation(); fecharMenu(); remover(c, item, tipo, fileira); } }, texto);
+      const menu = el('div', { class: 'ub-menu' },
+        opcao('Não tenho interesse', 'video'),
+        ...(item.canal ? [opcao('Não recomendar este canal', 'canal')] : []));
+      // fixo na tela: dentro do trilho (que rola de lado) ele seria cortado
+      const r = mais.getBoundingClientRect();
+      menu.style.top = `${r.bottom + 4}px`;
+      menu.style.left = `${Math.max(8, r.right - 230)}px`;
+      document.getElementById('unbubble').append(menu);
+      mais.classList.add('aberto');
+      menuAberto = { menu, botao: mais };
+    });
+    c.append(capa, el('div', { class: 'ub-info' },
+      el('div', { class: 'ub-textos' },
+        el('a', { href: `/watch?v=${item.id}`, onclick: () => registrarClique(item, fileira) },
+          el('div', { class: 'ub-nome', title: item.titulo }, item.titulo)),
+        el('div', { class: 'ub-meta' }, item.canal || ''),
+        el('div', { class: 'ub-meta' }, meta)),
+      mais));
+    c.dataset.canal = item.canal || '';
+    return c;
+  }
+
+  function remover(c, item, tipo, fileira) {
+    const k = recusar(item, tipo, fileira);
+    const original = [...c.childNodes];
+    const escondidos = [];
+    if (tipo === 'canal') {  // some com os outros vídeos do canal na página também
+      for (const o of document.querySelectorAll('#unbubble .ub-card')) {
+        if (o !== c && o.dataset.canal === item.canal && o.style.display !== 'none') { o.style.display = 'none'; escondidos.push(o); }
+      }
+    }
+    const desfazer = el('button', {}, 'Desfazer');
+    desfazer.addEventListener('click', () => {
+      desfazerRecusa(k);
+      c.replaceChildren(...original);
+      for (const o of escondidos) o.style.display = '';
+    });
+    c.replaceChildren(el('div', { class: 'ub-removido' },
+      el('div', {}, tipo === 'canal' ? `Ok, nada mais de ${item.canal}.` : 'Vídeo removido. Vamos mostrar menos coisas assim.'),
+      desfazer));
+  }
+
+  // Uma fileira: título com a bolhinha, trilho sem barra de rolagem e setas no estilo do YouTube.
+  // carregarMais (opcional) é chamado perto do fim do trilho e devolve mais itens: rolagem infinita.
+  function fileira(id, titulo, itens, carregarMais) {
+    const trilho = el('div', { class: 'ub-trilho' });
+    const esq = el('button', { class: 'ub-seta esq', 'aria-label': 'Anterior', html: SVG_SETA });
+    const dir = el('button', { class: 'ub-seta dir', 'aria-label': 'Próximo', html: SVG_SETA });
+    const sec = el('section', { class: 'ub-fileira', 'data-fileira': id },
+      el('div', { class: 'ub-cab' }, el('span', { class: 'ub-bolha', title: 'fileira do unbubble' }), el('h2', { class: 'ub-titulo' }, titulo)),
+      el('div', { class: 'ub-linha' }, esq, trilho, dir));
+    const ids = new Set();
+    const por = (lista) => {
+      for (const i of lista) {
+        if (!i?.id || ids.has(i.id) || bloqueado(i)) continue;
+        ids.add(i.id);
+        trilho.append(card(i, id));
+      }
+    };
+    por(itens);
+    let carregando = false, acabou = !carregarMais;
+    const atualizar = () => {
+      const fimVisivel = trilho.scrollLeft + trilho.clientWidth;
+      esq.classList.toggle('ativa', trilho.scrollLeft > 4);
+      dir.classList.toggle('ativa', fimVisivel < trilho.scrollWidth - 4 || !acabou);
+      if (!acabou && !carregando && fimVisivel > trilho.scrollWidth - 3 * 276) {
+        carregando = true;
+        carregarMais().then(novos => {
+          if (!novos || !novos.length) acabou = true; else por(novos);
+        }).catch(e => { acabou = true; log('fileira', id, 'parou:', e.message); })
+          .finally(() => { carregando = false; atualizar(); });
+      }
+    };
+    const passo = () => Math.max(trilho.clientWidth - 276, 276);
+    esq.addEventListener('click', () => trilho.scrollBy({ left: -passo(), behavior: 'smooth' }));
+    dir.addEventListener('click', () => trilho.scrollBy({ left: passo(), behavior: 'smooth' }));
+    trilho.addEventListener('scroll', atualizar, { passive: true });
+    new ResizeObserver(atualizar).observe(trilho);
+    sec._vazia = () => !trilho.children.length;
+    return sec;
   }
 
   function bloco() {
@@ -296,13 +497,66 @@
   }
 
   function desenharFileiras(caixa, home) {
-    for (const f of home.fileiras) {
-      if (!f.itens || !f.itens.length) continue;
-      caixa.append(
-        el('div', { class: 'ub-cab' },
-          el('span', { class: 'ub-bolha', title: 'fileira do unbubble' }),
-          el('h2', { class: 'ub-titulo' }, f.titulo)),
-        el('div', { class: 'ub-trilho' }, ...f.itens.map(i => card(i, f.id))));
+    const ui = (f) => { if (f.itens?.length) { const s = fileira(f.id, f.titulo, f.itens); if (!s._vazia()) caixa.append(s); } };
+    const fs = home.fileiras || [];
+    for (const f of fs.filter(f => !f.id.startsWith('cat_'))) ui(f);
+    caixa.append(el('div', { id: 'ub-temas-yt' }));  // fileiras dos temas do próprio YouTube entram aqui
+    for (const f of fs.filter(f => f.id.startsWith('cat_'))) ui(f);
+  }
+
+  // ---------- Fileiras infinitas com os temas que o próprio YouTube sugere (chips do topo da home) ----------
+  const TEMAS_IGNORADOS = /^(tudo|all|novidades? para voc[eê]|novos? para voc[eê]|enviados recentemente|assistidos|recently uploaded|watched|new to you)$/i;
+  const texto = t => (typeof t === 'string' ? t : t?.simpleText ?? t?.content ?? t?.runs?.map(r => r.text).join('') ?? '');
+
+  function videosDoFeed(j) {
+    const out = [];
+    for (const l of achar(j, 'lockupViewModel')) {
+      if (l.contentType && l.contentType !== 'LOCKUP_CONTENT_TYPE_VIDEO') continue;  // mixes, playlists
+      const md = l.metadata?.lockupMetadataViewModel;
+      if (!md || !l.contentId) continue;
+      const prog = achar(l.contentImage, 'thumbnailOverlayProgressBarViewModel')[0];
+      if (prog && prog.startPercent >= 50) continue;  // já visto
+      const linhas = achar(md.metadata, 'metadataRows')[0] || [];
+      const partes = linhas.map(r => (r.metadataParts || []).map(p => p.text?.content).filter(Boolean));
+      out.push({ id: l.contentId, titulo: texto(md.title), canal: partes[0]?.[0] || '', meta: (partes[1] || []).join(' • ') });
+    }
+    for (const v of achar(j, 'videoRenderer')) {
+      out.push({ id: v.videoId, titulo: texto(v.title), canal: texto(v.ownerText) || texto(v.shortBylineText),
+                 meta: [texto(v.shortViewCountText) || texto(v.viewCountText), texto(v.publishedTimeText)].filter(Boolean).join(' • ') });
+    }
+    return out.filter(v => /^[\w-]{11}$/.test(v.id || ''));
+  }
+
+  async function desenharTemasDoYouTube(lugar) {
+    const j = await browse({ browseId: 'FEwhat_to_watch' });
+    const chips = [];
+    for (const c of achar(j, 'chipCloudChipRenderer')) {
+      const tok = achar(c.navigationEndpoint, 'token')[0];
+      if (tok && !c.isSelected) chips.push({ nome: texto(c.text), tok });
+    }
+    for (const c of achar(j, 'chipViewModel')) {
+      const tok = achar(c, 'token')[0];
+      if (tok && !c.selected && !c.isSelected) chips.push({ nome: texto(c.text), tok });
+    }
+    const vistos = new Set();
+    const temas = chips.filter(c => c.nome && !TEMAS_IGNORADOS.test(c.nome.trim()) && !vistos.has(c.nome) && vistos.add(c.nome));
+    log(`temas do YouTube: ${temas.map(c => c.nome).join(', ') || 'nenhum'}`);
+    for (const t of temas) {
+      try {
+        let r = await browse({ continuation: t.tok });
+        let prox = proximo(r);
+        const s = fileira(`yt_${t.nome}`, t.nome, videosDoFeed(r), async () => {
+          if (!prox) return [];
+          await pausa();
+          r = await browse({ continuation: prox });
+          prox = proximo(r);
+          return videosDoFeed(r);
+        });
+        if (!s._vazia()) lugar.append(s);
+      } catch (e) {
+        log(`tema ${t.nome} falhou:`, e.message);
+      }
+      await pausa();
     }
   }
 
@@ -364,6 +618,7 @@
     for (const it of contents.querySelectorAll(':scope > ytd-rich-item-renderer')) {
       const d = dadosDoItem(it);
       if (!d) continue;
+      if (bloqueado(d)) { it.style.display = 'none'; continue; }
       let dec = decisao.get(d.id);
       if (!dec) {
         const tv = temasMapa.videos?.[d.id];
@@ -443,7 +698,9 @@
         desenharConvite(caixa);
       } else {
         const home = await lerHome();
+        carregarBloqueios(home);
         if (home) desenharFileiras(caixa, home);  // falhou e sem cache: sem fileiras, mas o teto ainda vale
+        else caixa.append(el('div', { id: 'ub-temas-yt' }));
       }
       if (document.getElementById('unbubble')) return;
       // mesma largura e recuo da grade de vídeos do YouTube
@@ -452,6 +709,8 @@
       caixa.style.marginRight = `${Math.max(pai.right - g.right, 0)}px`;
       contents.before(caixa);
       if (GM_getValue('token', '')) iniciarTeto(contents).catch(e => log('erro no teto:', e));
+      const lugar = document.getElementById('ub-temas-yt');
+      if (lugar) desenharTemasDoYouTube(lugar).catch(e => log('temas do YouTube falharam:', e.message));
     } catch (e) {
       log('erro, home original mantida:', e);
     } finally {
