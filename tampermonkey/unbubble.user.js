@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.6.0
+// @version      0.6.1
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, Em Alta, Mais vistos, temas e categorias), Não tenho interesse, teto por tema nos recomendados e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -736,6 +736,7 @@
       caixa.style.marginLeft = `${Math.max(g.left - pai.left, 0)}px`;
       caixa.style.marginRight = `${Math.max(pai.right - g.right, 0)}px`;
       contents.before(caixa);
+      log(`home montada: ${caixa.querySelectorAll('.ub-fileira').length} fileiras nossas`);
       if (!GM_getValue('token', '')) return;
       // Substitui a grade infinita do YouTube pelas fileiras, mas só se houver fileira de verdade
       // (nunca página em branco). Escondida, a grade também para de carregar mais vídeos.
@@ -765,6 +766,22 @@
     GM_setValue('home_cache', null);
     GM_setValue('temas_cache', null);
   }
+
+  // Vigia: o YouTube às vezes recria a grade da home depois de carregar (e leva as fileiras junto), ou
+  // traz uma grade nova visível. Se as fileiras sumiram, monta de novo; se a grade voltou, esconde.
+  function vigiar() {
+    if (location.pathname !== '/' || rodando || !GM_getValue('token', '')) return;
+    const caixa = document.getElementById('unbubble');
+    if (!caixa) { log('fileiras sumiram da página, montando de novo'); montar(); return; }
+    const a = alvo();
+    if (a && a.style.display !== 'none' && caixa.querySelector('.ub-fileira')) {
+      a.style.display = 'none';
+      const cab = a.parentElement?.querySelector(':scope > #header');
+      if (cab) cab.style.display = 'none';
+      if (a.previousElementSibling !== caixa) a.before(caixa);
+    }
+  }
+  setInterval(vigiar, 1500);
 
   GM_registerMenuCommand('Conectar / trocar token', configurarToken);
   GM_registerMenuCommand('Capturar meu histórico agora', () => capturarSeHora(true));
