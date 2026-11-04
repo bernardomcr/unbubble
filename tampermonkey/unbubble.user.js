@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.14.1
+// @version      0.14.2
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -887,10 +887,14 @@
       } catch (e) { log(`coleta "${t.busca || t.video}" falhou:`, e.message); }
       await pausa();
     }
-    GM_setValue('cursor_fura', { de: rumos.gerado_em, pos: cursor.pos + lote.length - deCliques.length });
+    const pos = cursor.pos + lote.length - deCliques.length;
+    GM_setValue('cursor_fura', { de: rumos.gerado_em, pos });
     GM_setValue('sementes_cliques', [...feitas, ...deCliques.map(t => t.video)].slice(-500));
-    log(`fura-bolha: lote de ${lote.length} pedidos (${cursor.pos}–${cursor.pos + lote.length - deCliques.length} de ${tarefas.length})`);
-    return { coletado_em: new Date().toISOString(), rumos_de: rumos.gerado_em, itens: [...itens.values()] };
+    log(`fura-bolha: lote de ${lote.length} pedidos (${cursor.pos}–${pos} de ${tarefas.length})`);
+    // "restantes": quantas buscas do estoque da semana ainda faltam. Perto do fim, o GitHub pede um estoque novo ao
+    // Sonnet antes da semana acabar (rumos.py, recarga antecipada), para a fileira não secar no meio de uma maratona.
+    return { coletado_em: new Date().toISOString(), rumos_de: rumos.gerado_em, total: tarefas.length,
+             restantes: Math.max(0, tarefas.length - pos), itens: [...itens.values()] };
   }
 
   let coletandoFura = false;
