@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.13
+// @version      0.14
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -58,9 +58,9 @@
     });
   }
 
-  async function lerHome() {
+  async function lerHome(forcar = false) {
     const cache = GM_getValue('home_cache', null);
-    if (cache && agora() - cache.lido_em < CACHE_MIN * 60e3) return cache.home;
+    if (cache && agora() - cache.lido_em < (forcar ? 60e3 : CACHE_MIN * 60e3)) return cache.home;
     try {
       const home = JSON.parse(await github('GET', 'contents/saida/home.json'));
       GM_setValue('home_cache', { lido_em: agora(), home });
@@ -696,9 +696,29 @@
     return p;
   }
 
+  // Aleatório infinito para o lado: o home.json traz até ~300 nichos (os que acabaram de chegar primeiro); a fileira
+  // mostra ALEAT_INICIO e vai puxando ALEAT_LOTE por vez. Perto do fim do estoque, pede uma coleta nova (no ritmo
+  // do uso); quando acaba, relê o home.json uma vez para pegar o que já ficou pronto.
+  const ALEAT_INICIO = 40, ALEAT_LOTE = 30, ALEAT_PEDIR = 60;
+  function fileiraAleatoria(f) {
+    let resto = f.itens.slice(ALEAT_INICIO), releu = false;
+    return fileira(f.id, f.titulo, f.itens.slice(0, ALEAT_INICIO), async () => {
+      if (resto.length < ALEAT_PEDIR) coletarFuraSeHora(false, 'fim');
+      if (!resto.length) {
+        if (releu) return null;
+        releu = true;
+        const nova = (await lerHome(true))?.fileiras?.find(x => x.id === f.id);
+        const ja = new Set((grupos.get(f.id)?.itens || []).map(i => i.id));
+        resto = (nova?.itens || []).filter(i => !ja.has(i.id));
+        if (!resto.length) return null;
+      }
+      return resto.splice(0, ALEAT_LOTE);
+    });
+  }
+
   function adicionarNossas(p, home) {
     const fs = (home.fileiras || []).filter(f => f.itens?.length && !f.id.startsWith('cat_'));
-    const nossa = f => fileira(f.id, f.titulo, f.itens);
+    const nossa = f => (f.id === 'fura_aleatorio' ? fileiraAleatoria(f) : fileira(f.id, f.titulo, f.itens));
     // Primeiro as que olham para ele (Dos seus canais, Fora da sua bolha), depois os recomendados do YouTube,
     // depois o que o Brasil está vendo (Em Alta, Mais vistos)
     const doBrasil = f => f.id === 'em_alta' || f.id === 'mais_vistos';
@@ -800,14 +820,17 @@
   }
 
   // ---------- Coleta para as fileiras fora da bolha (grátis: busca e relacionados do próprio YouTube) ----------
-  // O Sonnet escolhe 1x/semana as buscas por nível (saida/rumos.json). Aqui o navegador faz um lote por vez
-  // (no máximo LOTE_COLETA pedidos a cada COLETA_FURA_H horas, continuando de onde parou), mais os relacionados
+  // O Sonnet gera 1x/semana o estoque de buscas (saida/rumos.json, ~550 no Aleatório, já intercaladas por bloco).
+  // Aqui o navegador faz um lote por vez (LOTE_COLETA pedidos, continuando de onde parou), mais os relacionados
   // das sementes e dos vídeos que ele clicou nessas fileiras (no mesmo nível), e manda para
   // dados/fura/candidatos.json. O GitHub junta num estoque, filtra, o Haiku dá as notas e as fileiras aparecem.
+  // Quando: no ritmo do uso (perto do fim da fileira Aleatório, no máximo a cada FIM_FILEIRA_MIN) e um basal
+  // a cada COLETA_FURA_H horas (ou ao abrir, se passou do prazo), para a home nunca ficar velha.
   // Aleatório: os melhores vídeos achados pelas buscas (saida/fura_sementes.json) viram ponto de partida e o
   // navegador pega as sugestões do YouTube para eles como visitante anônimo (SUGESTOES_POR_LOTE por vez, 1 vez cada).
-  const COLETA_FURA_H = 2;
-  const LOTE_COLETA = 50;
+  const COLETA_FURA_H = 12;
+  const FIM_FILEIRA_MIN = 15;
+  const LOTE_COLETA = 30;
   const SUGESTOES_POR_LOTE = 10;
   const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
 
@@ -851,9 +874,11 @@
   }
 
   let coletandoFura = false;
-  async function coletarFuraSeHora(forcar = false) {
+  async function coletarFuraSeHora(forcar = false, motivo = 'basal') {
     if (coletandoFura || !GM_getValue('token', '')) return;
-    if (!forcar && agora() - GM_getValue('ultima_coleta_fura', 0) < COLETA_FURA_H * 36e5) return;
+    const espera = motivo === 'fim' ? FIM_FILEIRA_MIN * 60e3 : COLETA_FURA_H * 36e5;
+    if (!forcar && agora() - GM_getValue('ultima_coleta_fura', 0) < espera) return;
+    log(`fura-bolha: coleta (${forcar ? 'pedida' : motivo})`);
     coletandoFura = true;
     GM_setValue('ultima_coleta_fura', agora());
     try {
@@ -867,6 +892,8 @@
         content: base64(JSON.stringify(c)), ...(sha ? { sha } : {}),
       }, { json: true, tempo: 60000 });
       log(`fura-bolha: ${c.itens.length} candidatos enviados`);
+      // o GitHub leva uns minutos para avaliar e refazer a home: depois disso, a próxima leitura já pega a nova
+      setTimeout(() => GM_setValue('home_cache', null), 4 * 60e3);
     } catch (e) {
       log('coleta do fura-bolha falhou:', e.message);
     } finally {
@@ -1831,6 +1858,7 @@
   montar();
   setTimeout(() => capturarSeHora(), 8000);  // depois da página carregar, sem atrapalhar
   setTimeout(() => coletarFuraSeHora(), 20000);
+  setInterval(() => coletarFuraSeHora(), 30 * 60e3);  // basal de 12 h também com a aba aberta muito tempo
   setInterval(() => enviarUsoSeHora().catch(e => log('não consegui mandar o uso:', e.message)), 5 * 60e3);
   setTimeout(() => enviarUsoSeHora().catch(e => log('não consegui mandar o uso:', e.message)), 30000);
 })();
