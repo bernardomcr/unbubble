@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.15
+// @version      0.15.1
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -866,6 +866,31 @@
   const SUGESTOES_POR_LOTE = 15;  // com o estoque de buscas esgotado, o lote inteiro vira sugestões (correntes)
   const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
 
+  // Sugestões de um vídeo semente (v0.15.1): 2 páginas anônimas (~40, sem a bolha dele) + as da conta dele (~20).
+  // Cada uma leva a fonte: 'ambas' (o YouTube sugeriu sem saber quem ele é e também logado: ligada ao vídeo),
+  // 'anonima' ou 'conta' (pode ser a bolha dele: o GitHub tira as de afinidade alta que não são do mesmo assunto).
+  async function sugestoesDe(video) {
+    const anon = new Map(), conta = new Map();
+    try {
+      const j = await apiAnonima('next', { videoId: video });
+      for (const v of videosDoFeed(j)) anon.set(v.id, v);
+      const tok = proximo(achar(j, 'secondaryResults')[0] || {});
+      if (tok) {
+        await pausa();
+        for (const v of videosDoFeed(await apiAnonima('next', { continuation: tok }))) anon.set(v.id, v);
+      }
+    } catch (e) { log(`sugestões anônimas de ${video} falharam:`, e.message); }
+    try {
+      await pausa();
+      const j = await api('next', { videoId: video });
+      for (const v of videosDoFeed(achar(j, 'secondaryResults')[0] || j)) conta.set(v.id, v);
+    } catch (e) { log(`sugestões da conta de ${video} falharam:`, e.message); }
+    const out = [];
+    for (const [id, v] of anon) out.push({ ...v, fonte: conta.has(id) ? 'ambas' : 'anonima' });
+    for (const [id, v] of conta) if (!anon.has(id)) out.push({ ...v, fonte: 'conta' });
+    return out;
+  }
+
   async function coletarFura() {
     const rumos = JSON.parse(await github('GET', 'contents/saida/rumos.json'));
     const tarefas = [];
@@ -896,11 +921,14 @@
     deCliques.push(...deSugestoes);
     const lote = [...deCliques, ...tarefas.slice(cursor.pos, cursor.pos + LOTE_COLETA - deCliques.length)];
     const itens = new Map();
-    const juntar = (lista, origem) => { for (const v of lista) if (!itens.has(v.id)) itens.set(v.id, { ...v, origem }); };
+    const juntar = (lista, origem) => {
+      for (const { fonte, ...v } of lista) if (!itens.has(v.id)) itens.set(v.id, { ...v, origem: fonte ? { ...origem, fonte } : origem });
+    };
     for (const t of lote) {
       try {
         if (t.busca) juntar(videosDoFeed(await api('search', { query: t.busca, params: BUSCA_SO_VIDEOS })), t.origem);
-        else juntar(videosDoFeed(await (t.anonima ? apiAnonima : api)('next', { videoId: t.video })), t.origem);
+        else if (t.anonima) juntar(await sugestoesDe(t.video), t.origem);
+        else juntar(videosDoFeed(await api('next', { videoId: t.video })), t.origem);
       } catch (e) { log(`coleta "${t.busca || t.video}" falhou:`, e.message); }
       await pausa();
     }
