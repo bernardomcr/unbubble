@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.14
+// @version      0.14.1
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -60,7 +60,7 @@
 
   async function lerHome(forcar = false) {
     const cache = GM_getValue('home_cache', null);
-    if (cache && agora() - cache.lido_em < (forcar ? 60e3 : CACHE_MIN * 60e3)) return cache.home;
+    if (cache && !forcar && agora() - cache.lido_em < CACHE_MIN * 60e3) return cache.home;
     try {
       const home = JSON.parse(await github('GET', 'contents/saida/home.json'));
       GM_setValue('home_cache', { lido_em: agora(), home });
@@ -407,6 +407,8 @@
     #unbubble .ub-trilho { display: grid; grid-auto-flow: column; grid-auto-columns: 260px;
       gap: 16px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
     #unbubble .ub-trilho::-webkit-scrollbar { display: none; }
+    #unbubble .ub-buscando { aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center;
+      border-radius: 12px; border: 2px dashed #4FADEA; color: #4FADEA; font-size: 14px; font-weight: 500; }
     #unbubble .ub-seta { position: absolute; top: 73px; transform: translateY(-50%); z-index: 3;
       width: 56px; height: 56px; border-radius: 50%; padding: 0; cursor: pointer;
       border: 1px solid var(--ub-seta-borda); background: var(--ub-seta-fundo); color: var(--ub-texto);
@@ -698,22 +700,40 @@
 
   // Aleatório infinito para o lado: o home.json traz até ~300 nichos (os que acabaram de chegar primeiro); a fileira
   // mostra ALEAT_INICIO e vai puxando ALEAT_LOTE por vez. Perto do fim do estoque, pede uma coleta nova (no ritmo
-  // do uso); quando acaba, relê o home.json uma vez para pegar o que já ficou pronto.
-  const ALEAT_INICIO = 40, ALEAT_LOTE = 30, ALEAT_PEDIR = 60;
+  // do uso). Quando acaba, mostra "Buscando mais vídeos…" e espera: a coleta terminar e o GitHub refazer a home
+  // (1–2 min), conferindo a cada ALEAT_ESPERA_S segundos por até ALEAT_ESPERA_MIN minutos; os novos entram na hora.
+  const ALEAT_INICIO = 40, ALEAT_LOTE = 30, ALEAT_PEDIR = 60, ALEAT_ESPERA_S = 20, ALEAT_ESPERA_MIN = 4;
   function fileiraAleatoria(f) {
-    let resto = f.itens.slice(ALEAT_INICIO), releu = false;
-    return fileira(f.id, f.titulo, f.itens.slice(0, ALEAT_INICIO), async () => {
-      if (resto.length < ALEAT_PEDIR) coletarFuraSeHora(false, 'fim');
-      if (!resto.length) {
-        if (releu) return null;
-        releu = true;
-        const nova = (await lerHome(true))?.fileiras?.find(x => x.id === f.id);
-        const ja = new Set((grupos.get(f.id)?.itens || []).map(i => i.id));
-        resto = (nova?.itens || []).filter(i => !ja.has(i.id));
-        if (!resto.length) return null;
+    let resto = f.itens.slice(ALEAT_INICIO);
+    const novos = async () => {
+      const nova = (await lerHome(true))?.fileiras?.find(x => x.id === f.id);
+      const ja = new Set((grupos.get(f.id)?.itens || []).map(i => i.id));
+      return (nova?.itens || []).filter(i => !ja.has(i.id) && !bloqueado(i));
+    };
+    const esperarNovos = async () => {
+      const aviso = el('div', { class: 'ub-buscando' }, 'Buscando mais vídeos…');
+      sec.querySelector('.ub-trilho').append(aviso);
+      try {
+        const fim = agora() + ALEAT_ESPERA_MIN * 60e3;
+        while (agora() < fim) {
+          if (!coletandoFura) {
+            const lista = await novos().catch(() => []);
+            if (lista.length) return lista;
+          }
+          await new Promise(r => setTimeout(r, ALEAT_ESPERA_S * 1000));
+        }
+        return [];
+      } finally {
+        aviso.remove();
       }
+    };
+    const sec = fileira(f.id, f.titulo, f.itens.slice(0, ALEAT_INICIO), async () => {
+      if (resto.length < ALEAT_PEDIR) coletarFuraSeHora(false, 'fim');
+      if (!resto.length) resto = await esperarNovos();
+      if (!resto.length) return null;  // 4 min sem nada novo: para (volta ao recarregar a página)
       return resto.splice(0, ALEAT_LOTE);
     });
+    return sec;
   }
 
   function adicionarNossas(p, home) {
@@ -829,7 +849,7 @@
   // Aleatório: os melhores vídeos achados pelas buscas (saida/fura_sementes.json) viram ponto de partida e o
   // navegador pega as sugestões do YouTube para eles como visitante anônimo (SUGESTOES_POR_LOTE por vez, 1 vez cada).
   const COLETA_FURA_H = 12;
-  const FIM_FILEIRA_MIN = 15;
+  const FIM_FILEIRA_MIN = 5;
   const LOTE_COLETA = 30;
   const SUGESTOES_POR_LOTE = 10;
   const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
