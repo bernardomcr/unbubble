@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         unbubble
 // @namespace    https://github.com/bernardomcr/unbubble
-// @version      0.14.2
+// @version      0.15
 // @description  Home anti-bolha do YouTube: fileiras (seus canais, fora da bolha, aleatório, Em Alta, temas), página do vídeo no estilo antigo, Não tenho interesse e captura do histórico.
 // @match        https://www.youtube.com/*
 // @noframes
@@ -702,7 +702,7 @@
   // mostra ALEAT_INICIO e vai puxando ALEAT_LOTE por vez. Perto do fim do estoque, pede uma coleta nova (no ritmo
   // do uso). Quando acaba, mostra "Buscando mais vídeos…" e espera: a coleta terminar e o GitHub refazer a home
   // (1–2 min), conferindo a cada ALEAT_ESPERA_S segundos por até ALEAT_ESPERA_MIN minutos; os novos entram na hora.
-  const ALEAT_INICIO = 40, ALEAT_LOTE = 30, ALEAT_PEDIR = 60, ALEAT_ESPERA_S = 20, ALEAT_ESPERA_MIN = 4;
+  const ALEAT_INICIO = 40, ALEAT_LOTE = 30, ALEAT_PEDIR = 60, ALEAT_ESPERA_S = 20, ALEAT_ESPERA_MIN = 6;
   function fileiraAleatoria(f) {
     let resto = f.itens.slice(ALEAT_INICIO);
     const novos = async () => {
@@ -727,8 +727,17 @@
         aviso.remove();
       }
     };
+    let conferido = 0;
     const sec = fileira(f.id, f.titulo, f.itens.slice(0, ALEAT_INICIO), async () => {
-      if (resto.length < ALEAT_PEDIR) coletarFuraSeHora(false, 'fim');
+      if (resto.length < ALEAT_PEDIR) {
+        coletarFuraSeHora(false, 'fim');
+        // antes de acabar: se a home já foi refeita com vídeos novos (coleta anterior), junta no fim do que falta
+        if (!coletandoFura && agora() - conferido > 60e3) {
+          conferido = agora();
+          const ja = new Set(resto.map(i => i.id));
+          resto.push(...(await novos().catch(() => [])).filter(i => !ja.has(i.id)));
+        }
+      }
       if (!resto.length) resto = await esperarNovos();
       if (!resto.length) return null;  // 4 min sem nada novo: para (volta ao recarregar a página)
       return resto.splice(0, ALEAT_LOTE);
@@ -848,10 +857,13 @@
   // a cada COLETA_FURA_H horas (ou ao abrir, se passou do prazo), para a home nunca ficar velha.
   // Aleatório: os melhores vídeos achados pelas buscas (saida/fura_sementes.json) viram ponto de partida e o
   // navegador pega as sugestões do YouTube para eles como visitante anônimo (SUGESTOES_POR_LOTE por vez, 1 vez cada).
+  // Correntes (v0.15): o Haiku separa as sugestões em mesmo assunto / mesma vibe / lixo, e as de mesma vibe viram
+  // sementes da rodada seguinte (pai, raiz = busca original, passo); assim a fileira se realimenta sem busca nova.
+  // Buscas já feitas não se repetem (busca específica repetida não traz nada novo): esgotado o estoque, só correntes.
   const COLETA_FURA_H = 12;
   const FIM_FILEIRA_MIN = 5;
   const LOTE_COLETA = 30;
-  const SUGESTOES_POR_LOTE = 10;
+  const SUGESTOES_POR_LOTE = 15;  // com o estoque de buscas esgotado, o lote inteiro vira sugestões (correntes)
   const BUSCA_SO_VIDEOS = 'EgIQAQ==';  // filtro "Tipo: vídeo" da busca do YouTube
 
   async function coletarFura() {
@@ -865,7 +877,7 @@
     }
     // Volta de onde parou; se os rumos mudaram (nova semana), recomeça
     let cursor = GM_getValue('cursor_fura', { de: '', pos: 0 });
-    if (cursor.de !== rumos.gerado_em || cursor.pos >= tarefas.length) cursor = { de: rumos.gerado_em, pos: 0 };
+    if (cursor.de !== rumos.gerado_em) cursor = { de: rumos.gerado_em, pos: 0 };
     // Vídeos que ele clicou nas fileiras fora da bolha: os relacionados entram no mesmo nível (uma vez cada)
     const feitas = new Set(GM_getValue('sementes_cliques', []));
     const deCliques = GM_getValue('cliques', [])
@@ -874,8 +886,13 @@
       .map(c => ({ video: c.id, origem: { nivel: c.fileira.slice(5), semente: c.titulo || '', canal_semente: c.canal || '' } }));
     let sementes = [];
     try { sementes = JSON.parse(await github('GET', 'contents/saida/fura_sementes.json')).sementes || []; } catch (e) { /* ainda não existe */ }
-    const deSugestoes = sementes.filter(s => !feitas.has(s.id)).slice(0, SUGESTOES_POR_LOTE)
-      .map(s => ({ video: s.id, anonima: true, origem: { nivel: 'aleatorio', semente: s.titulo || '', canal_semente: s.canal || '' } }));
+    sementes = sementes.filter(s => !feitas.has(s.id));
+    // sem sementes e sem buscas novas (não deveria acontecer): aí sim volta ao começo do estoque
+    if (cursor.pos >= tarefas.length && !sementes.length) cursor.pos = 0;
+    const esgotado = cursor.pos >= tarefas.length;
+    const deSugestoes = sementes.slice(0, esgotado ? LOTE_COLETA - deCliques.length : SUGESTOES_POR_LOTE)
+      .map(s => ({ video: s.id, anonima: true, origem: { nivel: 'aleatorio', semente: s.titulo || '', canal_semente: s.canal || '',
+                                                         pai: s.id, raiz: s.raiz || '', passo: (s.passo || 0) + 1 } }));
     deCliques.push(...deSugestoes);
     const lote = [...deCliques, ...tarefas.slice(cursor.pos, cursor.pos + LOTE_COLETA - deCliques.length)];
     const itens = new Map();
@@ -887,10 +904,10 @@
       } catch (e) { log(`coleta "${t.busca || t.video}" falhou:`, e.message); }
       await pausa();
     }
-    const pos = cursor.pos + lote.length - deCliques.length;
+    const pos = Math.min(tarefas.length, cursor.pos + lote.length - deCliques.length);
     GM_setValue('cursor_fura', { de: rumos.gerado_em, pos });
     GM_setValue('sementes_cliques', [...feitas, ...deCliques.map(t => t.video)].slice(-500));
-    log(`fura-bolha: lote de ${lote.length} pedidos (${cursor.pos}–${pos} de ${tarefas.length})`);
+    log(`fura-bolha: lote de ${lote.length} pedidos (${deSugestoes.length} sementes; buscas ${cursor.pos}–${pos} de ${tarefas.length})`);
     // "restantes": quantas buscas do estoque da semana ainda faltam. Perto do fim, o GitHub pede um estoque novo ao
     // Sonnet antes da semana acabar (rumos.py, recarga antecipada), para a fileira não secar no meio de uma maratona.
     return { coletado_em: new Date().toISOString(), rumos_de: rumos.gerado_em, total: tarefas.length,
